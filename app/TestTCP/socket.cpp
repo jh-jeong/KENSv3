@@ -39,10 +39,14 @@ namespace APP_SOCKET
     }
 
     Socket::~Socket() {
-
+        if (this->addr_src != NULL)
+            delete this->addr_src;
+        if (this->addr_dest != NULL)
+            delete this->addr_dest;
     }
 
     bool Socket::isBound() {
+        // TODO Another way
         return (this->addr_src != NULL);
     };
 

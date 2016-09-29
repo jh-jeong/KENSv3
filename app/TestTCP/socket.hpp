@@ -56,7 +56,6 @@ namespace APP_SOCKET
     APP_SOCKET::Socket *getSocketEntry (socket_map* sock_map, int pid, int fd);
     long removeSocketEntry (socket_map* sock_map, int pid, int fd);
     bool checkOverlap (socket_map* sock_map, sockaddr_in* other);
-    int bindSocketEntry(APP_SOCKET::Socket *sock, sockaddr_in *addr_in);
 
 }
 
