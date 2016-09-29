@@ -70,9 +70,9 @@ namespace E {
                                    (socklen_t) param.param3_int);
                 break;
             case GETSOCKNAME:
-                //this->syscall_getsockname(syscallUUID, pid, param.param1_int,
-                //		static_cast<struct sockaddr *>(param.param2_ptr),
-                //		static_cast<socklen_t*>(param.param3_ptr));
+                this->syscall_getsockname(syscallUUID, pid, param.param1_int,
+                		static_cast<struct sockaddr *>(param.param2_ptr),
+                		static_cast<socklen_t*>(param.param3_ptr));
                 break;
             case GETPEERNAME:
                 //this->syscall_getpeername(syscallUUID, pid, param.param1_int,
@@ -102,16 +102,16 @@ namespace E {
         APP_SOCKET::Socket *sock = new APP_SOCKET::Socket(domain, type);
         // TODO socket valid check
 
-        TCPAssignment::sock_map[sock_id] = sock;
-        // std::cout << sock_map[sock_id] << std::endl;
+        TCPAssignment::sockets[sock_id] = sock;
+        // std::cout << sockets[sock_id] << std::endl;
         returnSystemCall(syscallUUID, fd);
     }
 
     void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
-        APP_SOCKET::Socket *sock = APP_SOCKET::getSocketEntry(&sock_map, pid, fd);
+        APP_SOCKET::Socket *sock = APP_SOCKET::getSocketEntry(&sockets, pid, fd);
         // TODO sock valid check
 
-        APP_SOCKET::removeSocketEntry(&sock_map, pid, fd);
+        APP_SOCKET::removeSocketEntry(&sockets, pid, fd);
         delete sock;
 
         removeFileDescriptor(pid, fd);
@@ -120,6 +120,32 @@ namespace E {
 
     void TCPAssignment::syscall_bind(UUID syscallUUID, int pid,
                                      int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+
+        // convert sockaddr -> sockaddr_in
+        if (addr->sa_family != AF_INET)
+            returnSystemCall(syscallUUID,  -EAFNOSUPPORT);
+
+        struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
+        APP_SOCKET::Socket *sock = APP_SOCKET::getSocketEntry(&sockets, pid, sockfd);
+
+        if (sock->isBound())
+            returnSystemCall(syscallUUID, -1);
+
+        if(APP_SOCKET::checkOverlap(&sockets, addr_in))
+            returnSystemCall(syscallUUID, -1);
+
+        returnSystemCall(syscallUUID, sock->bindAddr(addr_in));
+    }
+
+    void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid,
+                                            int sockfd , struct sockaddr *addr , socklen_t * addrlen) {
+        APP_SOCKET::Socket *sock = APP_SOCKET::getSocketEntry(&sockets, pid, sockfd);
+        // TODO sock valid check
+        struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
+        addr_in->sin_port = htons(sock->addr_src->port);
+        addr_in->sin_addr.s_addr = htonl(sock->addr_src->addr);
+        addr_in->sin_family = AF_INET;
+
         returnSystemCall(syscallUUID, 0);
     }
 

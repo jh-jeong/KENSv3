@@ -27,7 +27,7 @@ class TCPAssignment : public HostModule, public NetworkModule, public SystemCall
 {
 private:
 	virtual void timerCallback(void* payload) final;
-    APP_SOCKET::socket_map sock_map;
+    APP_SOCKET::socket_map sockets;
 
 public:
 	TCPAssignment(Host* host);
@@ -42,7 +42,8 @@ protected:
     virtual void syscall_close(UUID syscallUUID, int pid, int fd);
     virtual void syscall_bind(UUID syscallUUID, int pid,
                               int sockfd, const struct sockaddr *addr, socklen_t addrlen);
-
+    virtual void syscall_getsockname(UUID syscallUUID , int pid ,
+                                int sockfd, struct sockaddr *addr, socklen_t * addrlen);
 };
 
 class TCPAssignmentProvider
