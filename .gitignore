@@ -41,3 +41,9 @@
 *.exe
 *.out
 *.app
+
+# CMakeLists.txt for CLion
+CMakeLists.txt
+
+# xml files
+*.xml
