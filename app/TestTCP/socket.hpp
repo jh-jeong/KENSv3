@@ -10,6 +10,7 @@
 
 #include <E/E_Common.hpp>
 #include <netinet/in.h>
+#include "protocol.hpp"
 
 
 namespace APP_SOCKET
@@ -26,36 +27,44 @@ namespace APP_SOCKET
         bool operator == (const Address other);
     };
 
+    enum Status {
+        CLOSED,
+        LISTEN,
+        SYN_RCVD,
+        SYN_SENT,
+        ESTABLISHED,
+        CLOSE_WAIT,
+        LAST_ACK,
+        FIN_WAIT_1,
+        FIN_WAIT_2,
+        CLOSING,
+        TIME_WAIT
+    };
+
+
     class Socket
     {
-    private:
-        enum Status {
-            CLOSED
-        };
-
     public:
         Address *addr_src;
         Address *addr_dest;
 
         Status state;
+        uint32_t send_base, send_seq;
+        uint32_t ack_base, ack_seq;
 
         int type;
         int domain;
+        int backlog;
 
         Socket(int domain, int type);
         ~Socket();
 
         bool isBound();
+        bool make_hdr(struct PROTOCOL::kens_hdr *hdr, uint8_t flag);
         int bindAddr(sockaddr_in *addr_in);
-        int fd;
+
+        std::queue<APP_SOCKET::Socket *> wait_queue;
     };
-
-    typedef std::pair<int, int> s_id;
-    typedef std::unordered_map<s_id, APP_SOCKET::Socket *, std::hash<s_id>> socket_map;
-
-    APP_SOCKET::Socket *getSocketEntry (socket_map* sock_map, int pid, int fd);
-    long removeSocketEntry (socket_map* sock_map, int pid, int fd);
-    bool checkOverlap (socket_map* sock_map, sockaddr_in* other);
 
 }
 

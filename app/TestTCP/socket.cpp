@@ -36,6 +36,10 @@ namespace APP_SOCKET
         this->type = type;
         this->addr_src = NULL;
         this->addr_dest = NULL;
+        this->send_base = 0;
+        this->send_seq = 0;
+        this->ack_base = 0;
+        this->ack_seq = 0;
     }
 
     Socket::~Socket() {
@@ -50,38 +54,37 @@ namespace APP_SOCKET
         return (this->addr_src != NULL);
     };
 
-    Socket *getSocketEntry (APP_SOCKET::socket_map *sock_map,
-                                        int pid, int fd) {
-        APP_SOCKET::Socket *sock;
-        APP_SOCKET::s_id sock_id = {pid, fd};
-        sock = sock_map->find(sock_id)->second;
-        return sock;
+    bool Socket::make_hdr(struct PROTOCOL::kens_hdr *hdr, uint8_t flag) {
+
+        if (addr_src == NULL || addr_dest == NULL)
+            return false;
+
+        memset(&hdr, 0, sizeof(struct PROTOCOL::kens_hdr));
+
+        hdr->ip.ip_src.s_addr = ntohl(addr_src->addr);
+        hdr->ip.ip_dst.s_addr =ntohl(addr_dest->addr);
+        hdr->tcp.th_sport = ntohs(addr_src->port);
+        hdr->tcp.th_dport = ntohs(addr_dest->port);
+
+        hdr->tcp.fin = (flag & TH_FIN) ? 1 : 0;
+        hdr->tcp.syn = (flag & TH_SYN) ? 1 : 0;
+        hdr->tcp.rst = (flag & TH_RST) ? 1 : 0;
+        hdr->tcp.psh = (flag & TH_PUSH) ? 1 : 0;
+        hdr->tcp.ack = (flag & TH_ACK) ? 1 : 0;
+        hdr->tcp.urg = (flag & TH_URG) ? 1 : 0;
+
+        hdr->tcp.seq = send_seq;
+        hdr->tcp.ack_seq = (flag & TH_ACK) ? htonl(ack_seq) : 0;
+
+        return true;
     }
 
     int Socket::bindAddr(sockaddr_in *addr_in) {
         if (this->state != CLOSED)
             return -1;
+
         this->addr_src = new APP_SOCKET::Address(addr_in);
         return 0;
     }
 
-    long removeSocketEntry (APP_SOCKET::socket_map *sock_map,
-                                        int pid, int fd) {
-        s_id sock_id = {pid, fd};
-        return sock_map->erase(sock_id);
-    }
-
-    bool checkOverlap(APP_SOCKET::socket_map *sock_map,
-                      sockaddr_in *other) {
-
-        for(auto it = sock_map->begin(); it != sock_map->end() ; ++it )
-        {
-            Socket *sock = it->second;
-            if (!sock->isBound())
-                continue;
-            if ((*sock->addr_src) == APP_SOCKET::Address(other))
-                return true; //overlap
-        }
-        return false;
-    }
 }
