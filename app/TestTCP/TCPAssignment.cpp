@@ -187,6 +187,7 @@ namespace E {
                     d_sock->addr_dest = src;
                     d_sock->addr_src = dst;
                     d_sock->state = APP_SOCKET::SYN_RCVD;
+                    d_sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
 
                     sendFlagPacket(d_sock, TH_SYN | TH_ACK);
                 }
@@ -231,8 +232,6 @@ namespace E {
                     UUID syscallUUID = entry->second;
                     returnSystemCall(syscallUUID, 0);
                 }
-
-                //
                 break;
             case APP_SOCKET::ESTABLISHED:
                 break;
