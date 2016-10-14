@@ -67,6 +67,18 @@ namespace E {
         return false;
     }
 
+    bool TCPAssignment::sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag) {
+        Packet *packet = allocatePacket(sizeof(struct PROTOCOL::kens_hdr));
+        struct PROTOCOL::kens_hdr hdr;
+        if (!sock->make_hdr(&hdr, flag)) {
+            freePacket(packet);
+            return false;
+        }
+        packet->writeData(0, &hdr, sizeof(struct PROTOCOL::kens_hdr));
+        this->sendPacket("IPv4", packet);
+
+        return true;
+    }
 
     void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallParameter &param) {
         switch (param.syscallNumber) {
@@ -83,16 +95,17 @@ namespace E {
                 //this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
                 break;
             case CONNECT:
-                //this->syscall_connect(syscallUUID, pid, param.param1_int,
-                //		static_cast<struct sockaddr*>(param.param2_ptr), (socklen_t)param.param3_int);
+                this->syscall_connect(syscallUUID, pid, param.param1_int,
+                                      static_cast<struct sockaddr*>(param.param2_ptr),
+                                      (socklen_t)param.param3_int);
                 break;
             case LISTEN:
                 this->syscall_listen(syscallUUID, pid, param.param1_int, param.param2_int);
                 break;
             case ACCEPT:
-                //this->syscall_accept(syscallUUID, pid, param.param1_int,
-                //		static_cast<struct sockaddr*>(param.param2_ptr),
-                //		static_cast<socklen_t*>(param.param3_ptr));
+                this->syscall_accept(syscallUUID, pid, param.param1_int,
+                                     static_cast<struct sockaddr*>(param.param2_ptr),
+                                     static_cast<socklen_t*>(param.param3_ptr));
                 break;
             case BIND:
                 this->syscall_bind(syscallUUID, pid, param.param1_int,
@@ -101,8 +114,8 @@ namespace E {
                 break;
             case GETSOCKNAME:
                 this->syscall_getsockname(syscallUUID, pid, param.param1_int,
-                		static_cast<struct sockaddr *>(param.param2_ptr),
-                		static_cast<socklen_t*>(param.param3_ptr));
+                                          static_cast<struct sockaddr *>(param.param2_ptr),
+                                          static_cast<socklen_t*>(param.param3_ptr));
                 break;
             case GETPEERNAME:
                 //this->syscall_getpeername(syscallUUID, pid, param.param1_int,
@@ -115,6 +128,129 @@ namespace E {
     }
 
     void TCPAssignment::packetArrived(std::string fromModule, Packet *packet) {
+
+        if (fromModule.compare("IPv4")) {
+            freePacket(packet);
+            return;
+        }
+        if (packet->getSize() < sizeof (struct PROTOCOL::kens_hdr)) {
+            freePacket(packet);
+            return;
+        }
+
+        struct PROTOCOL::kens_hdr hdr;
+        packet->readData(0, &hdr, sizeof (struct PROTOCOL::kens_hdr));
+
+        Address *src = new Address(ntohl(hdr.ip.ip_src.s_addr),
+                                   ntohs(hdr.tcp.th_sport));
+        Address *dst = new Address(ntohl(hdr.ip.ip_dst.s_addr),
+                                   ntohs(hdr.tcp.th_dport));
+        Socket *sock = NULL;
+
+        for(auto it = sockets.begin(); it != sockets.end() ; ++it )
+        {
+            Socket *s = *it;
+            if (s->addr_src == NULL || s->addr_dest == NULL)
+                continue;
+            if (!((*s->addr_src) == *dst))
+                continue;
+            if (!((*s->addr_dest) == *src))
+                continue;
+            sock = s;
+            break;
+        }
+
+        if (sock == NULL) {
+            for(auto it = listen_sockets.begin(); it != listen_sockets.end() ; ++it )
+            {
+                Socket *s = *it;
+                if (!((*s->addr_src) == *dst))
+                    continue;
+                sock = s;
+                break;
+            }
+        }
+
+        if (sock == NULL) {
+            freePacket(packet);
+            return;
+        }
+
+        switch (sock->state) {
+            case APP_SOCKET::LISTEN:
+                //recv syn packet
+                //send syn ack
+                if(hdr.tcp.syn) {
+                    Socket *d_sock = new Socket(*sock);
+                    sockets.insert(d_sock);
+
+                    d_sock->addr_dest = src;
+                    d_sock->addr_src = dst;
+                    d_sock->state = APP_SOCKET::SYN_RCVD;
+
+                    sendFlagPacket(d_sock, TH_SYN | TH_ACK);
+                }
+                break;
+            case APP_SOCKET::SYN_RCVD:
+                if(hdr.tcp.ack) {
+                    sock->state = APP_SOCKET::ESTABLISHED;
+
+                    APP_SOCKET::Socket *l_sock = NULL;
+
+                    for(auto it = listen_sockets.begin(); it != listen_sockets.end() ; ++it )
+                    {
+                        Socket *s = *it;
+                        if (!((*s->addr_src) == *dst))
+                            continue;
+                        l_sock = s;
+                        break;
+                    }
+
+                    if (l_sock != NULL) {
+                        l_sock->wait_queue.push(sock);
+                    }
+                }
+                break;
+
+            case APP_SOCKET::SYN_SENT:
+                //recv syn_ack from server
+                //send ack
+                // go established
+                if(hdr.tcp.syn && hdr.tcp.ack) {
+                    sendFlagPacket(sock, TH_ACK);
+                    sock->state = APP_SOCKET::ESTABLISHED;
+
+                    std::unordered_map<APP_SOCKET::Socket *, UUID>::iterator entry;
+                    entry = syscall_blocks.find(sock);
+
+                    if (entry == syscall_blocks.end()) {
+                        freePacket(packet);
+                        return;
+                    }
+
+                    UUID syscallUUID = entry->second;
+                    returnSystemCall(syscallUUID, 0);
+                }
+
+                //
+                break;
+            case APP_SOCKET::ESTABLISHED:
+                break;
+            case APP_SOCKET::CLOSE_WAIT:
+                break;
+            case APP_SOCKET::LAST_ACK:
+                break;
+            case APP_SOCKET::FIN_WAIT_1:
+                break;
+            case APP_SOCKET::FIN_WAIT_2:
+                break;
+            case APP_SOCKET::CLOSING:
+                break;
+            case APP_SOCKET::TIME_WAIT:
+                break;
+            default:
+                break;
+        }
 
     }
 
@@ -187,7 +323,7 @@ namespace E {
     }
 
     void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid,
-                                            int sockfd , struct sockaddr *addr , socklen_t * addrlen) {
+                                            int sockfd , struct sockaddr *addr , socklen_t *addrlen) {
         Socket *sock = getAppSocket(pid, sockfd);
         if (sock == NULL) {
             errno = EBADF;
@@ -234,4 +370,120 @@ namespace E {
         returnSystemCall(syscallUUID, 0);
     }
 
+    void TCPAssignment::syscall_accept(UUID syscallUUID, int pid,
+                                       int sockfd, struct sockaddr *addr,
+                                       socklen_t *addrlen) {
+
+        Socket *sock = getAppSocket(pid, sockfd);
+        if (sock == NULL) {
+            errno = EBADF;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+        if (addrlen <= 0) {
+            errno = EINVAL;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+        if (sock->state != APP_SOCKET::LISTEN) {
+            errno = EINVAL;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+
+        struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
+
+
+        if (!sock->wait_queue.empty()) {
+            Socket *d_sock = sock->wait_queue.front();
+            sock->wait_queue.pop();
+
+            memset(addr_in, 0, sizeof(struct sockaddr_in));
+            addr_in->sin_port = htons(d_sock->addr_dest->port);
+            addr_in->sin_addr.s_addr = htonl(d_sock->addr_dest->addr);
+            addr_in->sin_family = AF_INET;
+            *addrlen = sizeof(struct sockaddr_in);
+
+            int fd = createFileDescriptor(pid);
+            d_sock->state = APP_SOCKET::ESTABLISHED;
+
+            sockets.insert(d_sock);
+            s_id sock_id = {pid, fd};
+            app_sockets[sock_id] = d_sock;
+
+            returnSystemCall(syscallUUID, fd);
+        }
+
+    }
+
+    void TCPAssignment::syscall_connect(UUID syscallUUID, int pid,
+                                        int sockfd, const struct sockaddr *addr,
+                                        socklen_t addrlen) {
+
+        struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
+        Socket *sock = getAppSocket(pid, sockfd);
+
+        uint32_t c_addr;
+        uint16_t c_port;
+        Host *c_host = getHost();
+
+        if (sock == NULL) {
+            errno = EBADF;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+        if (sock->state == APP_SOCKET::CLOSED) {
+            errno = EISCONN;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+
+        if (addrlen != sizeof (struct sockaddr_in)) {
+            errno = EFAULT;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+        if(!sock->isBound())
+        {
+            uint32_t local = LOCALHOST;
+
+            struct sockaddr_in c_addr_in;
+            memset(&c_addr_in, 0, sizeof (struct sockaddr_in));
+            c_addr_in.sin_family = addr_in->sin_family;
+
+            if (!c_host->getIPAddr((uint8_t *)&c_addr,
+                                   c_host->getRoutingTable((uint8_t *) &local))) {
+                returnSystemCall(syscallUUID, -1);
+                return;
+            }
+            c_addr = ntohl(c_addr); // c_addr is in network order
+
+            int p_iter = 0;
+            for (p_iter = 0; p_iter < PORT_ITER_MAX; p_iter++) {
+                c_port = (uint16_t) ((rand() % (LOCAL_PORT_MAX + 1 - LOCAL_PORT_MIN)) + LOCAL_PORT_MIN);
+                c_addr_in.sin_addr.s_addr = c_addr;
+                c_addr_in.sin_port = c_port;
+
+                // TODO checkOverlap must be tested before calling bindAddr -> capsulate
+                if (!checkOverlap(&c_addr_in))
+                {
+                    sock->bindAddr(&c_addr_in); // TODO sock is guaranteed to be CLOSED.
+                    break;
+                }
+            }
+            if (p_iter == PORT_ITER_MAX) {
+                errno = EADDRNOTAVAIL;
+                returnSystemCall(syscallUUID, -1);
+                return;
+            }
+        }
+
+        sock->addr_dest->addr = addr_in->sin_addr.s_addr;
+        sock->addr_dest->port = addr_in->sin_port;
+
+        sendFlagPacket(sock, TH_SYN);
+        syscall_blocks[sock] = syscallUUID;
+
+        sock->state = APP_SOCKET::SYN_SENT;
+    }
 }

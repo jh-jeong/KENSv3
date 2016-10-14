@@ -51,7 +51,7 @@ namespace E
         long removeAppSocket(int pid, int fd);
         bool checkOverlap (sockaddr_in* other);
 
-        //bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag);
+        bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag);
 
     protected:
         virtual void systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param) final;
@@ -64,11 +64,11 @@ namespace E
         virtual void syscall_getsockname(UUID syscallUUID , int pid ,
                                          int sockfd, struct sockaddr *addr, socklen_t * addrlen);
         virtual void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog);
-        //virtual void syscall_accept(UUID syscallUUID, int pid,
-        //                            int sockfd, struct sockaddr *addr, socklen_t *addrlen);
-        //virtual void syscall_connect(UUID syscallUUID, int pid,
-        //                             int sockfd, const struct sockaddr *addr,
-        //                             socklen_t addrlen);
+        virtual void syscall_accept(UUID syscallUUID, int pid,
+                                    int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+        virtual void syscall_connect(UUID syscallUUID, int pid,
+                                     int sockfd, const struct sockaddr *addr,
+                                     socklen_t addrlen);
     };
 
     class TCPAssignmentProvider

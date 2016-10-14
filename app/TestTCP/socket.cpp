@@ -59,7 +59,7 @@ namespace APP_SOCKET
         if (addr_src == NULL || addr_dest == NULL)
             return false;
 
-        memset(&hdr, 0, sizeof(struct PROTOCOL::kens_hdr));
+        memset(hdr, 0, sizeof(struct PROTOCOL::kens_hdr));
 
         hdr->ip.ip_src.s_addr = ntohl(addr_src->addr);
         hdr->ip.ip_dst.s_addr =ntohl(addr_dest->addr);
