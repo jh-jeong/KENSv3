@@ -14,6 +14,7 @@
 #include <E/Networking/E_NetworkUtil.hpp>
 #include "TCPAssignment.hpp"
 #include "protocol.hpp"
+#include <gtest/gtest.h>
 
 using APP_SOCKET::Socket;
 using APP_SOCKET::Address;
@@ -74,6 +75,12 @@ namespace E {
             freePacket(packet);
             return false;
         }
+
+        hdr.tcp.check = htons(~NetworkUtil::tcp_sum(hdr.ip.ip_src.s_addr,
+                                                    hdr.ip.ip_dst.s_addr,
+                                                    (uint8_t *) &(hdr.tcp),
+                                                    sizeof (struct tcphdr)));
+
         packet->writeData(0, &hdr, sizeof(struct PROTOCOL::kens_hdr));
         this->sendPacket("IPv4", packet);
 
@@ -128,11 +135,11 @@ namespace E {
     }
 
     void TCPAssignment::packetArrived(std::string fromModule, Packet *packet) {
-
         if (fromModule.compare("IPv4")) {
             freePacket(packet);
             return;
         }
+
         if (packet->getSize() < sizeof (struct PROTOCOL::kens_hdr)) {
             freePacket(packet);
             return;
@@ -176,9 +183,11 @@ namespace E {
             return;
         }
 
+        freePacket(packet);
+
         switch (sock->state) {
             case APP_SOCKET::LISTEN:
-                //recv syn packet
+                //recv syn packet 
                 //send syn ack
                 if(hdr.tcp.syn) {
                     Socket *d_sock = new Socket(*sock);
@@ -187,6 +196,7 @@ namespace E {
                     d_sock->addr_dest = src;
                     d_sock->addr_src = dst;
                     d_sock->state = APP_SOCKET::SYN_RCVD;
+                    d_sock->send_seq = (uint32_t) rand();
                     d_sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
 
                     sendFlagPacket(d_sock, TH_SYN | TH_ACK);
@@ -250,7 +260,6 @@ namespace E {
             default:
                 break;
         }
-
     }
 
     void TCPAssignment::timerCallback(void *payload) {

@@ -6,6 +6,7 @@
 
 namespace APP_SOCKET
 {
+
     Address::Address(sockaddr_in *addr_in)
     {
         uint16_t port = ntohs(addr_in->sin_port);
@@ -36,9 +37,7 @@ namespace APP_SOCKET
         this->type = type;
         this->addr_src = NULL;
         this->addr_dest = NULL;
-        this->send_base = 0;
-        this->send_seq = 0;
-        this->ack_base = 0;
+        this->send_seq = (uint32_t) rand();
         this->ack_seq = 0;
     }
 
@@ -61,10 +60,12 @@ namespace APP_SOCKET
 
         memset(hdr, 0, sizeof(struct PROTOCOL::kens_hdr));
 
-        hdr->ip.ip_src.s_addr = ntohl(addr_src->addr);
-        hdr->ip.ip_dst.s_addr =ntohl(addr_dest->addr);
-        hdr->tcp.th_sport = ntohs(addr_src->port);
-        hdr->tcp.th_dport = ntohs(addr_dest->port);
+        hdr->ip.ip_src.s_addr = htonl(addr_src->addr);
+        hdr->ip.ip_dst.s_addr = htonl(addr_dest->addr);
+        hdr->ip.ip_p = IP_P_TCP;
+
+        hdr->tcp.th_sport = htons(addr_src->port);
+        hdr->tcp.th_dport = htons(addr_dest->port);
 
         hdr->tcp.fin = (flag & TH_FIN) ? 1 : 0;
         hdr->tcp.syn = (flag & TH_SYN) ? 1 : 0;
@@ -73,7 +74,10 @@ namespace APP_SOCKET
         hdr->tcp.ack = (flag & TH_ACK) ? 1 : 0;
         hdr->tcp.urg = (flag & TH_URG) ? 1 : 0;
 
-        hdr->tcp.seq = send_seq;
+        hdr->tcp.doff = 5;
+        hdr->tcp.window = htons(51200);
+
+        hdr->tcp.seq = htonl(send_seq);
         hdr->tcp.ack_seq = (flag & TH_ACK) ? htonl(ack_seq) : 0;
 
         return true;

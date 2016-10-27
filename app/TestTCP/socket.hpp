@@ -49,8 +49,8 @@ namespace APP_SOCKET
         Address *addr_dest;
 
         Status state;
-        uint32_t send_base, send_seq;
-        uint32_t ack_base, ack_seq;
+        uint32_t send_seq;
+        uint32_t ack_seq;
 
         int type;
         int domain;
