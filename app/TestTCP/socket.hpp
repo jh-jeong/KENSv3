@@ -48,13 +48,15 @@ namespace APP_SOCKET
         Address *addr_src;
         Address *addr_dest;
 
+        Socket* parent;
+
         Status state;
         uint32_t send_seq;
         uint32_t ack_seq;
 
         int type;
         int domain;
-        int backlog;
+        uint backlog;
 
         Socket(int domain, int type);
         ~Socket();
@@ -63,7 +65,8 @@ namespace APP_SOCKET
         bool make_hdr(struct PROTOCOL::kens_hdr *hdr, uint8_t flag);
         int bindAddr(sockaddr_in *addr_in);
 
-        std::queue<APP_SOCKET::Socket *> wait_queue;
+        std::set<APP_SOCKET::Socket *> wait_sock;
+        std::queue<APP_SOCKET::Socket *> est_queue;
     };
 
 }

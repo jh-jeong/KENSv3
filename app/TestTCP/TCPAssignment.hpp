@@ -30,6 +30,7 @@ namespace E
 
     typedef std::pair<int, int> s_id;
     typedef std::pair<struct sockaddr_in *, socklen_t *> addr_ptr;
+    typedef std::pair<int, UUID> syscall_cont;
 
     class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
     {
@@ -39,7 +40,7 @@ namespace E
         std::set<APP_SOCKET::Socket *> sockets;
         std::set<APP_SOCKET::Socket *> listen_sockets;
         std::unordered_map<UUID, addr_ptr> accept_cont;
-        std::unordered_map<APP_SOCKET::Socket *, UUID> syscall_blocks;
+        std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;
 
     public:
         TCPAssignment(Host* host);

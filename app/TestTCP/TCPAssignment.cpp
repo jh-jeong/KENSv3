@@ -184,11 +184,13 @@ namespace E {
         }
 
         freePacket(packet);
-
         switch (sock->state) {
+            case APP_SOCKET::CLOSED:
+                break;
             case APP_SOCKET::LISTEN:
-                //recv syn packet 
+                //recv syn packet
                 //send syn ack
+
                 if(hdr.tcp.syn) {
                     Socket *d_sock = new Socket(*sock);
                     sockets.insert(d_sock);
@@ -198,28 +200,72 @@ namespace E {
                     d_sock->state = APP_SOCKET::SYN_RCVD;
                     d_sock->send_seq = (uint32_t) rand();
                     d_sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
+                    d_sock->parent = sock;
 
-                    sendFlagPacket(d_sock, TH_SYN | TH_ACK);
+                    if (sock->wait_sock.size() < sock->backlog) {
+                        sock->wait_sock.insert(d_sock);
+                        sendFlagPacket(d_sock, TH_SYN | TH_ACK);
+                    }
+                    else {
+                        sendFlagPacket(d_sock, TH_RST);
+                        delete d_sock;
+                    }
                 }
                 break;
+
             case APP_SOCKET::SYN_RCVD:
                 if(hdr.tcp.ack) {
+                    sock->send_seq++;
+                    sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
                     sock->state = APP_SOCKET::ESTABLISHED;
 
-                    APP_SOCKET::Socket *l_sock = NULL;
+                    // TODO check sequence number
 
-                    for(auto it = listen_sockets.begin(); it != listen_sockets.end() ; ++it )
-                    {
-                        Socket *s = *it;
-                        if (!((*s->addr_src) == *dst))
-                            continue;
-                        l_sock = s;
-                        break;
+                    Socket *parent = sock->parent;
+
+                    if (parent == NULL) {
+                        std::cout << "Empty parent socket while SYN_RCVD" << std::endl;
+                        return;
                     }
 
-                    if (l_sock != NULL) {
-                        l_sock->wait_queue.push(sock);
+                    if (!parent->wait_sock.erase(sock)) {
+                        std::cout << "The parents has no such child" << std::endl;
+                        return;
+                    };
+
+                    std::unordered_map<APP_SOCKET::Socket *, syscall_cont>::iterator entry;
+                    entry = syscall_blocks.find(parent);
+
+                    if (entry != syscall_blocks.end()) {
+                        UUID syscallUUID = entry->second.second;
+                        int pid = entry->second.first;
+                        int fd = createFileDescriptor(pid);
+
+                        std::unordered_map<UUID, addr_ptr>::iterator accept_entry;
+                        accept_entry = accept_cont.find(syscallUUID);
+
+                        if (accept_entry == accept_cont.end()) {
+                            std::cout << "No accept context." << std::endl;
+                            return;
+                        }
+
+                        struct sockaddr_in *addr_in = accept_entry->second.first;
+                        socklen_t *addrlen = accept_entry->second.second;
+
+                        memset(addr_in, 0, sizeof(struct sockaddr_in));
+                        addr_in->sin_port = htons(sock->addr_dest->port);
+                        addr_in->sin_addr.s_addr = htonl(sock->addr_dest->addr);
+                        addr_in->sin_family = AF_INET;
+                        *addrlen = sizeof(struct sockaddr_in);
+
+                        s_id sock_id = {pid, fd};
+                        app_sockets[sock_id] = sock;
+
+                        syscall_blocks.erase(parent);
+                        returnSystemCall(syscallUUID, fd);
                     }
+
+                    parent->est_queue.push(sock);
                 }
                 break;
 
@@ -228,18 +274,25 @@ namespace E {
                 //send ack
                 // go established
                 if(hdr.tcp.syn && hdr.tcp.ack) {
-                    sendFlagPacket(sock, TH_ACK);
+
+                    // TODO check sequence number
+                    sock->send_seq++;
+                    sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
                     sock->state = APP_SOCKET::ESTABLISHED;
 
-                    std::unordered_map<APP_SOCKET::Socket *, UUID>::iterator entry;
+                    std::unordered_map<APP_SOCKET::Socket *, syscall_cont>::iterator entry;
                     entry = syscall_blocks.find(sock);
 
                     if (entry == syscall_blocks.end()) {
-                        freePacket(packet);
+                        std::cout << "SYN_SENT socket must save its context" << std::endl;
                         return;
                     }
 
-                    UUID syscallUUID = entry->second;
+                    sendFlagPacket(sock, TH_ACK);
+
+                    UUID syscallUUID = entry->second.second;
+                    syscall_blocks.erase(sock);
+
                     returnSystemCall(syscallUUID, 0);
                 }
                 break;
@@ -292,7 +345,6 @@ namespace E {
             if (sock->state == APP_SOCKET::LISTEN) {
                 listen_sockets.erase(sock);
             }
-            delete sock;
         }
 
         removeFileDescriptor(pid, fd);
@@ -372,7 +424,7 @@ namespace E {
             returnSystemCall(syscallUUID, -1);
             return;
         }
-        sock->backlog = backlog;
+        sock->backlog = (unsigned int) backlog;
         sock->state = APP_SOCKET::LISTEN;
         listen_sockets.insert(sock);
         returnSystemCall(syscallUUID, 0);
@@ -401,10 +453,15 @@ namespace E {
 
         struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
 
+        if (!sock->est_queue.empty()) {
+            Socket *d_sock = sock->est_queue.front();
+            sock->est_queue.pop();
 
-        if (!sock->wait_queue.empty()) {
-            Socket *d_sock = sock->wait_queue.front();
-            sock->wait_queue.pop();
+            if (d_sock->state != APP_SOCKET::ESTABLISHED) {
+                std::cout << "Un-established connection is in est_queue" << std::endl;
+                returnSystemCall(syscallUUID, -1);
+                return;
+            }
 
             memset(addr_in, 0, sizeof(struct sockaddr_in));
             addr_in->sin_port = htons(d_sock->addr_dest->port);
@@ -413,13 +470,16 @@ namespace E {
             *addrlen = sizeof(struct sockaddr_in);
 
             int fd = createFileDescriptor(pid);
-            d_sock->state = APP_SOCKET::ESTABLISHED;
 
-            sockets.insert(d_sock);
             s_id sock_id = {pid, fd};
             app_sockets[sock_id] = d_sock;
 
             returnSystemCall(syscallUUID, fd);
+            return;
+        }
+        else {
+            syscall_blocks[sock] = {pid, syscallUUID};
+            accept_cont[syscallUUID] = {addr_in, addrlen};
         }
 
     }
@@ -490,7 +550,7 @@ namespace E {
         sock->addr_dest->port = addr_in->sin_port;
 
         sendFlagPacket(sock, TH_SYN);
-        syscall_blocks[sock] = syscallUUID;
+        syscall_blocks[sock] = {pid, syscallUUID};
 
         sock->state = APP_SOCKET::SYN_SENT;
     }

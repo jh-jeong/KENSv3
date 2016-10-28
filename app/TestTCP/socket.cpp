@@ -37,6 +37,7 @@ namespace APP_SOCKET
         this->type = type;
         this->addr_src = NULL;
         this->addr_dest = NULL;
+        this->parent = NULL;
         this->send_seq = (uint32_t) rand();
         this->ack_seq = 0;
     }
