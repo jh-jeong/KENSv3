@@ -125,9 +125,9 @@ namespace E {
                                           static_cast<socklen_t*>(param.param3_ptr));
                 break;
             case GETPEERNAME:
-                //this->syscall_getpeername(syscallUUID, pid, param.param1_int,
-                //		static_cast<struct sockaddr *>(param.param2_ptr),
-                //		static_cast<socklen_t*>(param.param3_ptr));
+                this->syscall_getpeername(syscallUUID, pid, param.param1_int,
+                		static_cast<struct sockaddr *>(param.param2_ptr),
+                		static_cast<socklen_t*>(param.param3_ptr));
                 break;
             default:
                 assert(0);
@@ -147,7 +147,6 @@ namespace E {
 
         struct PROTOCOL::kens_hdr hdr;
         packet->readData(0, &hdr, sizeof (struct PROTOCOL::kens_hdr));
-
         Address *src = new Address(ntohl(hdr.ip.ip_src.s_addr),
                                    ntohs(hdr.tcp.th_sport));
         Address *dst = new Address(ntohl(hdr.ip.ip_dst.s_addr),
@@ -232,11 +231,11 @@ namespace E {
                         std::cout << "The parents has no such child" << std::endl;
                         return;
                     };
-
                     std::unordered_map<APP_SOCKET::Socket *, syscall_cont>::iterator entry;
                     entry = syscall_blocks.find(parent);
 
                     if (entry != syscall_blocks.end()) {
+
                         UUID syscallUUID = entry->second.second;
                         int pid = entry->second.first;
                         int fd = createFileDescriptor(pid);
@@ -255,7 +254,7 @@ namespace E {
                         memset(addr_in, 0, sizeof(struct sockaddr_in));
                         addr_in->sin_port = htons(sock->addr_dest->port);
                         addr_in->sin_addr.s_addr = htonl(sock->addr_dest->addr);
-                        addr_in->sin_family = AF_INET;
+                        addr_in->sin_family = AF_INET;  // Don't network ordering
                         *addrlen = sizeof(struct sockaddr_in);
 
                         s_id sock_id = {pid, fd};
@@ -263,6 +262,7 @@ namespace E {
 
                         syscall_blocks.erase(parent);
                         returnSystemCall(syscallUUID, fd);
+                        return;
                     }
 
                     parent->est_queue.push(sock);
@@ -273,6 +273,7 @@ namespace E {
                 //recv syn_ack from server
                 //send ack
                 // go established
+
                 if(hdr.tcp.syn && hdr.tcp.ack) {
 
                     // TODO check sequence number
@@ -488,6 +489,7 @@ namespace E {
                                         int sockfd, const struct sockaddr *addr,
                                         socklen_t addrlen) {
 
+        // TODO Success, but -1 cases
         struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
         Socket *sock = getAppSocket(pid, sockfd);
 
@@ -500,7 +502,8 @@ namespace E {
             returnSystemCall(syscallUUID, -1);
             return;
         }
-        if (sock->state == APP_SOCKET::CLOSED) {
+
+        if (sock->state != APP_SOCKET::CLOSED) {
             errno = EISCONN;
             returnSystemCall(syscallUUID, -1);
             return;
@@ -511,6 +514,7 @@ namespace E {
             returnSystemCall(syscallUUID, -1);
             return;
         }
+
         if(!sock->isBound())
         {
             uint32_t local = LOCALHOST;
@@ -524,13 +528,12 @@ namespace E {
                 returnSystemCall(syscallUUID, -1);
                 return;
             }
-            c_addr = ntohl(c_addr); // c_addr is in network order
 
             int p_iter = 0;
             for (p_iter = 0; p_iter < PORT_ITER_MAX; p_iter++) {
                 c_port = (uint16_t) ((rand() % (LOCAL_PORT_MAX + 1 - LOCAL_PORT_MIN)) + LOCAL_PORT_MIN);
-                c_addr_in.sin_addr.s_addr = c_addr;
-                c_addr_in.sin_port = c_port;
+                c_addr_in.sin_addr.s_addr = htonl(c_addr);
+                c_addr_in.sin_port = htons(c_port);
 
                 // TODO checkOverlap must be tested before calling bindAddr -> capsulate
                 if (!checkOverlap(&c_addr_in))
@@ -545,13 +548,39 @@ namespace E {
                 return;
             }
         }
-
-        sock->addr_dest->addr = addr_in->sin_addr.s_addr;
-        sock->addr_dest->port = addr_in->sin_port;
-
-        sendFlagPacket(sock, TH_SYN);
+        sock->addr_dest = new Address(addr_in);
+        sock->state = APP_SOCKET::SYN_SENT;
         syscall_blocks[sock] = {pid, syscallUUID};
 
-        sock->state = APP_SOCKET::SYN_SENT;
+        sendFlagPacket(sock, TH_SYN);
+    }
+
+    void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr,
+                                     socklen_t *addrlen)
+    {
+        returnSystemCall(syscallUUID, 0);
+        Socket *sock = getAppSocket(pid, sockfd);
+
+
+        if (sock == NULL) {
+            errno = EBADF;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+        if(sock->addr_dest == NULL)
+        {
+            errno = EFAULT;
+            returnSystemCall(syscallUUID , -1);
+            return ;
+        }
+
+        struct sockaddr_in addr_in;
+        addr_in.sin_port = htons(sock->addr_dest->port);
+        addr_in.sin_addr.s_addr = htonl(sock->addr_dest->addr);
+        addr_in.sin_family = AF_INET;
+
+        memcpy(addr, &addr_in, sizeof(struct sockaddr_in));
+
+        returnSystemCall(syscallUUID, 0);
     }
 }

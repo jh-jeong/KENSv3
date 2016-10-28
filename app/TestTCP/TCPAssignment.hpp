@@ -70,6 +70,8 @@ namespace E
         virtual void syscall_connect(UUID syscallUUID, int pid,
                                      int sockfd, const struct sockaddr *addr,
                                      socklen_t addrlen);
+        virtual void syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr,
+                                         socklen_t *addrlen);
     };
 
     class TCPAssignmentProvider

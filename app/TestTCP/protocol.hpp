@@ -31,11 +31,6 @@ namespace PROTOCOL
         u_int16_t tcp_size;
     } __attribute__((packed));
 
-    uint16_t checksum (const char *buf, size_t size);
-    uint16_t tcp_checksum (struct kens_hdr *hdr);
 }
-
-
-
 
 #endif //KENSV3_PROTOCOL_HPP
