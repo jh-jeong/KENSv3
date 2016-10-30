@@ -9,6 +9,7 @@
 #include <utility>
 
 #include <E/E_Common.hpp>
+#include <E/Networking/E_Packet.hpp>
 #include <netinet/in.h>
 #include "protocol.hpp"
 
@@ -51,6 +52,7 @@ namespace APP_SOCKET
         Socket* parent;
 
         Status state;
+        uint32_t send_base;
         uint32_t send_seq;
         uint32_t ack_seq;
 
@@ -58,12 +60,23 @@ namespace APP_SOCKET
         int domain;
         uint backlog;
 
-        Socket(int domain, int type);
+        int fd;
+
+        Socket(int domain, int type, int fd);
         ~Socket();
+
+        Socket* getChild(Address *src, Address *dst, uint32_t ack_init);
+
+        size_t packetSize();
+        bool getPacket(E::Packet* packet, uint8_t flag, size_t size);
+
+        bool listen(int backlog);
 
         bool isBound();
         bool make_hdr(struct PROTOCOL::kens_hdr *hdr, uint8_t flag);
         int bindAddr(sockaddr_in *addr_in);
+
+
 
         std::set<APP_SOCKET::Socket *> wait_sock;
         std::queue<APP_SOCKET::Socket *> est_queue;

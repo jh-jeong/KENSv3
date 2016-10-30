@@ -24,6 +24,7 @@
 #define LOCAL_PORT_MIN 32768
 #define LOCAL_PORT_MAX 60999
 #define PORT_ITER_MAX (LOCAL_PORT_MAX - LOCAL_PORT_MIN) * 2
+#define MAX_SEG_LIFETIME 60
 
 namespace E
 {
@@ -40,6 +41,7 @@ namespace E
         std::set<APP_SOCKET::Socket *> sockets;
         std::set<APP_SOCKET::Socket *> listen_sockets;
         std::unordered_map<UUID, addr_ptr> accept_cont;
+        std::unordered_map<APP_SOCKET::Socket *, UUID> timers;
         std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;
 
     public:
@@ -49,7 +51,6 @@ namespace E
         virtual ~TCPAssignment();
 
         APP_SOCKET::Socket *getAppSocket(int pid, int fd);
-        long removeAppSocket(int pid, int fd);
         bool checkOverlap (sockaddr_in* other);
 
         bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag);

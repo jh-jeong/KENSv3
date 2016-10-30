@@ -2,7 +2,9 @@
 // Created by biscuit on 16. 9. 28.
 //
 
+#include <E/Networking/E_NetworkUtil.hpp>
 #include "socket.hpp"
+#include <cerrno>
 
 namespace APP_SOCKET
 {
@@ -29,7 +31,7 @@ namespace APP_SOCKET
         return matchPort && (matchAddr || hasAny);
     }
 
-    Socket::Socket(int domain, int type)
+    Socket::Socket(int domain, int type, int fd)
     {
         // TODO type validation
         this->state = CLOSED;
@@ -38,8 +40,10 @@ namespace APP_SOCKET
         this->addr_src = NULL;
         this->addr_dest = NULL;
         this->parent = NULL;
-        this->send_seq = (uint32_t) rand();
+        this->send_base = (uint32_t) rand();
+        this->send_seq = send_base;
         this->ack_seq = 0;
+        this->fd = fd;
     }
 
     Socket::~Socket() {
@@ -81,7 +85,65 @@ namespace APP_SOCKET
         hdr->tcp.seq = htonl(send_seq);
         hdr->tcp.ack_seq = (flag & TH_ACK) ? htonl(ack_seq) : 0;
 
+        hdr->tcp.check = htons(~E::NetworkUtil::tcp_sum(hdr->ip.ip_src.s_addr,
+                                                        hdr->ip.ip_dst.s_addr,
+                                                        (uint8_t *) &(hdr->tcp),
+                                                        sizeof (struct tcphdr)));
+
         return true;
+    }
+
+    size_t Socket::packetSize() {
+        return sizeof(struct PROTOCOL::kens_hdr);
+    }
+
+    bool Socket::getPacket(E::Packet* packet, uint8_t flag, size_t size) {
+
+        if (size != packetSize()) {
+            return false;
+        }
+
+        struct PROTOCOL::kens_hdr hdr;
+        if (!make_hdr(&hdr, flag)) {
+            return false;
+        }
+
+        packet->writeData(0, &hdr, size);
+        return true;
+    }
+
+    bool Socket::listen(int backlog) {
+        if (backlog <= 0) {
+            errno = EINVAL;
+            return false;
+        }
+        if (state != CLOSED) {
+            errno = EADDRINUSE;
+            return false;
+        }
+        if (!isBound()) {
+            errno = EADDRINUSE;
+            return false;
+        }
+
+        this->backlog = (unsigned int) backlog;
+        this->state = APP_SOCKET::LISTEN;
+
+        return true;
+    }
+
+    Socket* Socket::getChild(Address *src, Address *dst, uint32_t ack_init) {
+        Socket *d_sock = new Socket(*this);
+
+        d_sock->fd = -1;
+        d_sock->addr_src = src;
+        d_sock->addr_dest = dst;
+        d_sock->state = SYN_RCVD;
+        d_sock->send_seq = (uint32_t) rand();
+        d_sock->ack_seq = ack_init;
+        d_sock->parent = this;
+
+        return d_sock;
     }
 
     int Socket::bindAddr(sockaddr_in *addr_in) {
