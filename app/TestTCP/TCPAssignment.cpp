@@ -38,7 +38,7 @@ namespace E {
     }
 
     void TCPAssignment::finalize() {
-        
+
     }
 
     Socket *TCPAssignment::getAppSocket(int pid, int fd) {

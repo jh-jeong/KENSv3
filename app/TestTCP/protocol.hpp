@@ -23,14 +23,6 @@ namespace PROTOCOL
         struct tcphdr tcp;
     } __attribute__((packed));
 
-    struct pseudo_tcp_hdr
-    {
-        struct in_addr source, dest;
-        u_int8_t reserved;
-        u_int8_t protocol;
-        u_int16_t tcp_size;
-    } __attribute__((packed));
-
 }
 
 #endif //KENSV3_PROTOCOL_HPP

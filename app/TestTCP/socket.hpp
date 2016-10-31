@@ -76,8 +76,6 @@ namespace APP_SOCKET
         bool make_hdr(struct PROTOCOL::kens_hdr *hdr, uint8_t flag);
         int bindAddr(sockaddr_in *addr_in);
 
-
-
         std::set<APP_SOCKET::Socket *> wait_sock;
         std::queue<APP_SOCKET::Socket *> est_queue;
     };
