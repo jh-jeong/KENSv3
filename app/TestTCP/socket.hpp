@@ -13,6 +13,9 @@
 #include <netinet/in.h>
 #include "protocol.hpp"
 
+#define MSS 512
+#define RECV_BUFFER MSS*100
+#define SEND_BUFFER MSS*50
 
 namespace APP_SOCKET
 {
@@ -59,6 +62,11 @@ namespace APP_SOCKET
         int type;
         int domain;
         uint backlog;
+
+        char *buf_recv;
+        char *buf_send;
+
+        u_int16_t rwnd;
 
         int fd;
 

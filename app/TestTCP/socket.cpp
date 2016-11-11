@@ -43,6 +43,12 @@ namespace APP_SOCKET
         this->send_base = (uint32_t) rand();
         this->send_seq = send_base;
         this->ack_seq = 0;
+
+        this->buf_recv = (char *) malloc(RECV_BUFFER);
+        this->buf_send = (char *) malloc(SEND_BUFFER);
+
+        this->rwnd = 0;
+
         this->fd = fd;
     }
 
@@ -51,6 +57,9 @@ namespace APP_SOCKET
             delete this->addr_src;
         if (this->addr_dest != NULL)
             delete this->addr_dest;
+
+        free(this->buf_recv);
+        free(this->buf_send);
     }
 
     bool Socket::isBound() {
@@ -142,6 +151,8 @@ namespace APP_SOCKET
         d_sock->send_seq = (uint32_t) rand();
         d_sock->ack_seq = ack_init;
         d_sock->parent = this;
+        d_sock->buf_recv = (char *) malloc(RECV_BUFFER);
+        d_sock->buf_send = (char *) malloc(SEND_BUFFER);
 
         return d_sock;
     }

@@ -177,11 +177,16 @@ namespace E {
             return;
         }
 
-        uint32_t ack_num = ntohl(hdr.tcp.ack_seq);
-        if (ack_num > sock->send_base) {
-            sock->send_base = ack_num;
-            if (sock->send_base > sock->send_seq)
-                sock->send_seq = sock->send_base;
+        if (hdr.tcp.ack) {
+            uint32_t ack_num = ntohl(hdr.tcp.ack_seq);
+            if (ack_num > sock->send_base) {
+                sock->send_base = ack_num;
+                if (sock->send_base > sock->send_seq)
+                    sock->send_seq = sock->send_base;
+
+                u_int16_t rwnd = ntohs(hdr.tcp.th_win);
+                sock->rwnd = rwnd;
+            }
         }
 
         switch (sock->state) {
