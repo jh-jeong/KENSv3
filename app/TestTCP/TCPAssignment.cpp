@@ -64,21 +64,50 @@ namespace E {
     }
 
     bool TCPAssignment::sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag) {
-        size_t p_size = sock->packetSize();
-        size_t d_size = p_size - sizeof(struct PROTOCOL::kens_hdr);
-
-        Packet *packet = allocatePacket(p_size);
-        if (!sock->getPacket(packet, flag, p_size)) {
-            freePacket(packet);
-            return false;
-        }
-        this->sendPacket("IPv4", packet);
-        sock->send_seq += d_size;
-
         if (flag & (TH_SYN | TH_FIN)) {
-            sock->send_seq++;
-        }
+            size_t p_size = sock->packetSize();
+            Packet *packet = allocatePacket(p_size);
+            if (!sock->getPacket(packet, flag, p_size)) {
+                freePacket(packet);
+                return false;
+            }
 
+            sock->send_seq++;
+            this->sendPacket("IPv4", packet);
+        }
+        else {
+            size_t d_size = sock->buf_send->size();
+            int offset = 0;
+            char message[MSS] = {0};
+
+            if (d_size == 0) {
+                Packet *packet = allocatePacket(sizeof(struct PROTOCOL::kens_hdr));
+                if (!sock->getPacket(packet, flag, sizeof(struct PROTOCOL::kens_hdr))) {
+                    freePacket(packet);
+                    return false;
+                }
+
+                this->sendPacket("IPv4", packet);
+            }
+
+            while (d_size > 0) {
+                size_t c_size = std::min(d_size, (size_t) MSS);
+                Packet *packet = allocatePacket(c_size + sizeof(struct PROTOCOL::kens_hdr));
+                if (!sock->getPacket(packet, flag, c_size + sizeof(struct PROTOCOL::kens_hdr))) {
+                    freePacket(packet);
+                    return false;
+                }
+
+                sock->buf_send->read(message, c_size, offset);
+                packet->writeData(sizeof(struct PROTOCOL::kens_hdr), message, c_size);
+                offset += c_size;
+                d_size -= c_size;
+
+                this->sendPacket("IPv4", packet);
+                sock->send_seq += c_size;
+            };
+
+        }
         return true;
     }
 
@@ -91,10 +120,10 @@ namespace E {
                 this->syscall_close(syscallUUID, pid, param.param1_int);
                 break;
             case READ:
-                //this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+                this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
                 break;
             case WRITE:
-                //this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+                this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
                 break;
             case CONNECT:
                 this->syscall_connect(syscallUUID, pid, param.param1_int,
@@ -643,5 +672,80 @@ namespace E {
         memcpy(addr, &addr_in, sizeof(struct sockaddr_in));
 
         returnSystemCall(syscallUUID, 0);
+    }
+
+
+    void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *payload,
+                                     size_t len)
+    {
+        Socket *sock = getAppSocket(pid, sockfd);
+
+        if (sock == NULL) {
+            errno = EBADF;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+
+        if (len == 0) {
+            returnSystemCall(syscallUUID, 0);
+            return;
+        }
+
+        if(sock->buf_recv->size()) {
+            size_t bytes_read = sock->buf_recv->pop((char *) payload, len);
+            returnSystemCall(syscallUUID, bytes_read);
+        }
+        else {
+            syscall_blocks[sock] = {pid, syscallUUID};
+            read_cont[syscallUUID] = {payload, len};
+        }
+    }
+
+    void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *payload,
+                                      size_t len)
+    {
+        Socket *sock = getAppSocket(pid, sockfd);
+        char *buf = (char *) payload;
+
+        if (sock == NULL) {
+            errno = EBADF;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+
+        if (sock->state == APP_SOCKET::CLOSED) {
+            errno = EPIPE;
+            returnSystemCall(syscallUUID, -1);
+            return;
+        }
+
+        if(sock->addr_dest == NULL)
+        {
+            errno = EDESTADDRREQ;
+            returnSystemCall(syscallUUID , -1);
+            return;
+        }
+
+        if (len == 0) {
+            returnSystemCall(syscallUUID, 0);
+            return;
+        }
+
+        size_t available = sock->rwnd - sock->buf_send->size();
+        size_t bytes_write = sock->buf_send->write(buf, std::min(available, len));
+        buf += bytes_write;
+        len -= bytes_write;
+
+        // TODO Always ACK?
+        sendFlagPacket(sock, TH_ACK);
+
+        if (len != 0) {
+            syscall_blocks[sock] = {pid, syscallUUID};
+            write_cont[syscallUUID] = {buf, len};
+        }
+        else {
+            returnSystemCall(syscallUUID, len);
+        }
+        return;
     }
 }

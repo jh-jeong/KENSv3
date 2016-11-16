@@ -12,6 +12,7 @@
 #include <E/Networking/E_Packet.hpp>
 #include <netinet/in.h>
 #include "protocol.hpp"
+#include "buffer.hpp"
 
 #define MSS 512
 #define RECV_BUFFER MSS*100
@@ -63,9 +64,8 @@ namespace APP_SOCKET
         int domain;
         uint backlog;
 
-        char *buf_recv;
-        char *buf_send;
-
+        CircularBuffer *buf_recv;
+        CircularBuffer *buf_send;
         u_int16_t rwnd;
 
         int fd;

@@ -44,8 +44,8 @@ namespace APP_SOCKET
         this->send_seq = send_base;
         this->ack_seq = 0;
 
-        this->buf_recv = (char *) malloc(RECV_BUFFER);
-        this->buf_send = (char *) malloc(SEND_BUFFER);
+        this->buf_recv = new CircularBuffer(RECV_BUFFER);
+        this->buf_send = new CircularBuffer(SEND_BUFFER);
 
         this->rwnd = 0;
 
@@ -58,8 +58,8 @@ namespace APP_SOCKET
         if (this->addr_dest != NULL)
             delete this->addr_dest;
 
-        free(this->buf_recv);
-        free(this->buf_send);
+        delete this->buf_recv;
+        delete this->buf_send;
     }
 
     bool Socket::isBound() {
@@ -95,7 +95,7 @@ namespace APP_SOCKET
         hdr->tcp.ack_seq = (flag & TH_ACK) ? htonl(ack_seq) : 0;
 
         hdr->tcp.check = htons(~E::NetworkUtil::tcp_sum(hdr->ip.ip_src.s_addr,
-                                                        hdr->ip.ip_dst.s_addr,
+                                                                                                                                                                                                                                   hdr->ip.ip_dst.s_addr,
                                                         (uint8_t *) &(hdr->tcp),
                                                         sizeof (struct tcphdr)));
 
@@ -103,7 +103,7 @@ namespace APP_SOCKET
     }
 
     size_t Socket::packetSize() {
-        return sizeof(struct PROTOCOL::kens_hdr);
+        return sizeof(struct PROTOCOL::kens_hdr) + std::min(buf_send->size(), (size_t) MSS);
     }
 
     bool Socket::getPacket(E::Packet* packet, uint8_t flag, size_t size) {
@@ -116,6 +116,8 @@ namespace APP_SOCKET
         if (!make_hdr(&hdr, flag)) {
             return false;
         }
+
+        // rwnd
 
         packet->writeData(0, &hdr, size);
         return true;
@@ -151,8 +153,8 @@ namespace APP_SOCKET
         d_sock->send_seq = (uint32_t) rand();
         d_sock->ack_seq = ack_init;
         d_sock->parent = this;
-        d_sock->buf_recv = (char *) malloc(RECV_BUFFER);
-        d_sock->buf_send = (char *) malloc(SEND_BUFFER);
+        d_sock->buf_recv = new CircularBuffer(RECV_BUFFER);
+        d_sock->buf_send = new CircularBuffer(SEND_BUFFER);
 
         return d_sock;
     }

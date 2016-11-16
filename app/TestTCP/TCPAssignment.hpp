@@ -31,6 +31,7 @@ namespace E
 
     typedef std::pair<int, int> s_id;
     typedef std::pair<struct sockaddr_in *, socklen_t *> addr_ptr;
+    typedef std::pair<void *, size_t> buf_cont;
     typedef std::pair<int, UUID> syscall_cont;
 
     class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
@@ -41,6 +42,8 @@ namespace E
         std::set<APP_SOCKET::Socket *> sockets;
         std::set<APP_SOCKET::Socket *> listen_sockets;
         std::unordered_map<UUID, addr_ptr> accept_cont;
+        std::unordered_map<UUID, buf_cont> write_cont;
+        std::unordered_map<UUID, buf_cont> read_cont;
         std::unordered_map<APP_SOCKET::Socket *, UUID> timers;
         std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;
 
@@ -73,6 +76,10 @@ namespace E
                                      socklen_t addrlen);
         virtual void syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr,
                                          socklen_t *addrlen);
+        virtual void syscall_read(UUID syscallUUID, int pid, int sockfd, void * payload,
+                                         size_t len);
+        virtual void syscall_write(UUID syscallUUID, int pid, int sockfd, void * payload,
+                                         size_t len);
     };
 
     class TCPAssignmentProvider

@@ -3,7 +3,6 @@
 //
 
 #include "buffer.hpp"
-#include <algorithm>
 #include <cstring>
 
 CircularBuffer::CircularBuffer(size_t capacity)
@@ -48,7 +47,31 @@ size_t CircularBuffer::write(const char *data, size_t bytes)
     return bytes_to_write;
 }
 
-size_t CircularBuffer::read(char *data, size_t bytes)
+size_t CircularBuffer::read(char *data, size_t bytes, int offset)
+{
+    if (bytes == 0) return 0;
+    if (size_ <= offset) return 0;
+
+    size_t capacity = capacity_;
+    size_t bytes_to_read = std::min(bytes, size_-offset);
+    size_t off_index = (beg_index_ + offset) % capacity;
+
+    // Read in a single step
+    if (bytes_to_read <= capacity - off_index)
+        memcpy(data, data_ + off_index, bytes_to_read);
+    // Read in two steps
+    else
+    {
+        size_t size_1 = capacity - off_index;
+        memcpy(data, data_ + off_index, size_1);
+        size_t size_2 = bytes_to_read - size_1;
+        memcpy(data + size_1, data_, size_2);
+    }
+
+    return bytes_to_read;
+}
+
+size_t CircularBuffer::pop(char *data, size_t bytes)
 {
     if (bytes == 0) return 0;
 
@@ -62,7 +85,7 @@ size_t CircularBuffer::read(char *data, size_t bytes)
         beg_index_ += bytes_to_read;
         if (beg_index_ == capacity) beg_index_ = 0;
     }
-        // Read in two steps
+    // Read in two steps
     else
     {
         size_t size_1 = capacity - beg_index_;
