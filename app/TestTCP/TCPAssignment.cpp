@@ -441,15 +441,6 @@ namespace E {
         }
 
         returnSystemCall(syscallUUID, 0);
-
-        //if (sock != NULL) {
-        //    sockets.erase(sock);
-        //    if (sock->state == APP_SOCKET::LISTEN) {
-        //        listen_sockets.erase(sock);
-        //    }
-        //}
-        //delete sock;
-        //returnSystemCall(syscallUUID, 0);
     }
 
     void TCPAssignment::syscall_bind(UUID syscallUUID, int pid,
