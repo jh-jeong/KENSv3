@@ -34,6 +34,7 @@ namespace E
     typedef std::pair<void *, size_t> buf_cont;
     typedef std::pair<int, UUID> syscall_cont;
 
+
     class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
     {
     private:
@@ -44,8 +45,10 @@ namespace E
         std::unordered_map<UUID, addr_ptr> accept_cont;
         std::unordered_map<UUID, buf_cont> write_cont;
         std::unordered_map<UUID, buf_cont> read_cont;
+
         std::unordered_map<APP_SOCKET::Socket *, UUID> timers;
         std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;
+
 
     public:
         TCPAssignment(Host* host);

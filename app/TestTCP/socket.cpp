@@ -44,7 +44,7 @@ namespace APP_SOCKET
         this->send_seq = send_base;
         this->ack_seq = 0;
 
-        this->buf_recv = new CircularBuffer(RECV_BUFFER);
+        this->buf_recv = new IndexedCacheBuffer(RECV_BUFFER);
         this->buf_send = new CircularBuffer(SEND_BUFFER);
 
         this->rwnd = 0;
@@ -91,13 +91,8 @@ namespace APP_SOCKET
         hdr->tcp.doff = 5;
         hdr->tcp.window = htons(51200);
 
-        hdr->tcp.seq = htonl(send_seq);
+        hdr->tcp.seq = htonl(send_base);
         hdr->tcp.ack_seq = (flag & TH_ACK) ? htonl(ack_seq) : 0;
-
-        hdr->tcp.check = htons(~E::NetworkUtil::tcp_sum(hdr->ip.ip_src.s_addr,
-                                                                                                                                                                                                                                   hdr->ip.ip_dst.s_addr,
-                                                        (uint8_t *) &(hdr->tcp),
-                                                        sizeof (struct tcphdr)));
 
         return true;
     }
@@ -106,20 +101,25 @@ namespace APP_SOCKET
         return sizeof(struct PROTOCOL::kens_hdr) + std::min(buf_send->size(), (size_t) MSS);
     }
 
-    bool Socket::getPacket(E::Packet* packet, uint8_t flag, size_t size) {
+    bool Socket::getPacket(char *buf, uint8_t flag, size_t offset) {
 
-        if (size != packetSize()) {
+        struct PROTOCOL::kens_hdr *hdr = (struct PROTOCOL::kens_hdr *) buf;
+        if (!make_hdr(hdr, flag)) {
             return false;
         }
 
-        struct PROTOCOL::kens_hdr hdr;
-        if (!make_hdr(&hdr, flag)) {
-            return false;
+        size_t c_size = std::max((size_t) 0,
+                                 std::min(buf_send->size() - offset, (size_t) MSS));
+
+        if (c_size != 0) {
+            buf_send->read(buf + sizeof(struct PROTOCOL::kens_hdr), c_size, offset);
         }
-
-        // rwnd
-
-        packet->writeData(0, &hdr, size);
+        hdr->tcp.seq = htonl(send_base + (uint32_t) offset);
+      //  hdr->tcp.seq = htonl(send_seq + c_size);
+        hdr->tcp.check = htons(~E::NetworkUtil::tcp_sum(hdr->ip.ip_src.s_addr,
+                                                        hdr->ip.ip_dst.s_addr,
+                                                        (uint8_t *) &(hdr->tcp),
+                                                        (sizeof(struct tcphdr) + c_size)));
         return true;
     }
 
@@ -150,10 +150,11 @@ namespace APP_SOCKET
         d_sock->addr_src = src;
         d_sock->addr_dest = dst;
         d_sock->state = SYN_RCVD;
-        d_sock->send_seq = (uint32_t) rand();
+        d_sock->send_base = (uint32_t) rand();
+        d_sock->send_seq = d_sock->send_base;
         d_sock->ack_seq = ack_init;
         d_sock->parent = this;
-        d_sock->buf_recv = new CircularBuffer(RECV_BUFFER);
+        d_sock->buf_recv = new IndexedCacheBuffer(RECV_BUFFER);
         d_sock->buf_send = new CircularBuffer(SEND_BUFFER);
 
         return d_sock;

@@ -64,7 +64,7 @@ namespace APP_SOCKET
         int domain;
         uint backlog;
 
-        CircularBuffer *buf_recv;
+        IndexedCacheBuffer *buf_recv;
         CircularBuffer *buf_send;
         u_int16_t rwnd;
 
@@ -76,7 +76,7 @@ namespace APP_SOCKET
         Socket* getChild(Address *src, Address *dst, uint32_t ack_init);
 
         size_t packetSize();
-        bool getPacket(E::Packet* packet, uint8_t flag, size_t size);
+        bool getPacket(char *packet, uint8_t flag, size_t offset);
 
         bool listen(int backlog);
 
