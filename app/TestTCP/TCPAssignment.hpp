@@ -31,7 +31,8 @@ namespace E
 
     typedef std::pair<int, int> s_id;
     typedef std::pair<struct sockaddr_in *, socklen_t *> addr_ptr;
-    typedef std::pair<void *, size_t> buf_cont;
+    typedef std::pair<void *, size_t> buf_read;
+    typedef std::tuple<void *, size_t, size_t> buf_write;
     typedef std::pair<int, UUID> syscall_cont;
 
 
@@ -43,8 +44,8 @@ namespace E
         std::set<APP_SOCKET::Socket *> sockets;
         std::set<APP_SOCKET::Socket *> listen_sockets;
         std::unordered_map<UUID, addr_ptr> accept_cont;
-        std::unordered_map<UUID, buf_cont> write_cont;
-        std::unordered_map<UUID, buf_cont> read_cont;
+        std::unordered_map<UUID, buf_write> write_cont;
+        std::unordered_map<UUID, buf_read> read_cont;
 
         std::unordered_map<APP_SOCKET::Socket *, UUID> timers;
         std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;

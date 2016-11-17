@@ -4,6 +4,7 @@
 
 #include "buffer.hpp"
 #include <cstring>
+#include <iostream>
 
 CircularBuffer::CircularBuffer(size_t capacity)
         : beg_index_(0)
@@ -67,7 +68,6 @@ size_t CircularBuffer::read(char *data, size_t bytes, size_t offset)
         size_t size_2 = bytes_to_read - size_1;
         memcpy(data + size_1, data_, size_2);
     }
-
     return bytes_to_read;
 }
 
@@ -77,7 +77,6 @@ void CircularBuffer::pop(size_t bytes)
 
     size_t capacity = capacity_;
     size_t bytes_pop = std::min(bytes, size_);
-
     // Read in a single step
     if (bytes_pop <= capacity - beg_index_)
     {
@@ -91,7 +90,6 @@ void CircularBuffer::pop(size_t bytes)
         size_t size_2 = bytes_pop - size_1;
         beg_index_ = size_2;
     }
-
     size_ -= bytes_pop;
 }
 

@@ -84,7 +84,6 @@ namespace E {
 
             size_t cwnd = sock->send_seq - sock->send_base; // unacked size
             data_len -= cwnd;   //not send size
-            std::cout << "--" << data_len << std::endl;
             while (data_len > 0 ) {
                 size_t c_size = std::min(data_len, (size_t) MSS);
                 size_t p_size = c_size + sizeof(struct PROTOCOL::kens_hdr);
@@ -152,8 +151,6 @@ namespace E {
     }
 
     void TCPAssignment::packetArrived(std::string fromModule, Packet *packet) {
-
-        std::cout << "packet arrived " << std::endl;
         if (fromModule.compare("IPv4")) {
             freePacket(packet);
             return;
@@ -202,17 +199,14 @@ namespace E {
             return;
         }
 
-        std::cout<<"before pop :" <<sock->buf_send->size() << std::endl;
         uint32_t bytes_ack = 0;
         if (hdr.tcp.ack) {
             uint32_t ack_num = ntohl(hdr.tcp.ack_seq);
             if (ack_num > sock->send_base) {
                 bytes_ack = ack_num - sock->send_base;
-                sock->buf_send->pop(bytes_ack);
                 sock->send_base = ack_num;
 
                 u_int16_t rwnd = ntohs(hdr.tcp.th_win);
-                std::cout << hdr.tcp.window<< " vs " << hdr.tcp.th_win << std::endl;
                 sock->rwnd = rwnd;
             }
         }
@@ -331,22 +325,20 @@ namespace E {
                 }
 
                 if (hdr.tcp.ack) {
-
-                    //sock->buf_send->pop(bytes_ack);
-                    std::cout<<"after pop :" <<sock->buf_send->size()<< "capacity"<<sock->buf_send->capacity() << std::endl;
+                    sock->buf_send->pop(bytes_ack);
                     std::unordered_map<APP_SOCKET::Socket *, syscall_cont>::iterator entry;
                     entry = syscall_blocks.find(sock);
 
                     if (entry != syscall_blocks.end()) {
                         UUID syscallUUID = entry->second.second;
-                        std::unordered_map<UUID, buf_cont>::iterator entry_w;
+                        std::unordered_map<UUID, buf_write>::iterator entry_w;
                         entry_w = write_cont.find(syscallUUID);
                         if (entry_w != write_cont.end()) {
-                            char *payload = (char *) entry_w->second.first;
-                            size_t len = entry_w->second.second;
+                            char *payload = (char *) std::get<0>(entry_w->second);
+                            size_t len = std::get<1>(entry_w->second);
+                            size_t bytes_prev = std::get<2>(entry_w->second);
 
                             size_t available = sock->rwnd - sock->buf_send->size();
-                            //size_t available =sock->buf_send->capacity() - sock->buf_send->size();
                             size_t bytes_write = sock->buf_send->write(payload, std::min(available, len));
 
                             payload += bytes_write;
@@ -354,11 +346,12 @@ namespace E {
 
                             write_cont.erase(syscallUUID);
 
+                            size_t bytes_total = bytes_prev + bytes_write;
                             if (len > 0)
-                                write_cont[syscallUUID] = {payload, len};
+                                write_cont[syscallUUID] = buf_write(payload, len, bytes_write);
                             else {
                                 syscall_blocks.erase(sock);
-                                returnSystemCall(syscallUUID, bytes_write);
+                                returnSystemCall(syscallUUID, bytes_total);
                             }
                         }
                     }
@@ -385,7 +378,7 @@ namespace E {
 
                     if (entry != syscall_blocks.end()) {
                         UUID syscallUUID = entry->second.second;
-                        std::unordered_map<UUID, buf_cont>::iterator entry_r;
+                        std::unordered_map<UUID, buf_read>::iterator entry_r;
                         entry_r = read_cont.find(syscallUUID);
                         if (entry_r != read_cont.end()) {
                             char *payload = (char *) entry_r->second.first;
@@ -774,8 +767,6 @@ namespace E {
     void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *payload,
                                       size_t len)
     {
-        std::cout << "write" << std::endl;
-        //size_t return_len = len;
         Socket *sock = getAppSocket(pid, sockfd);
         char *buf = (char *) payload;
 
@@ -802,25 +793,23 @@ namespace E {
             returnSystemCall(syscallUUID, 0);
             return;
         }
-        std::cout << "in write rwnd: " << sock->rwnd << std::endl;
 
         size_t available = sock->rwnd - sock->buf_send->size();
-        //size_t available = sock->buf_send->capacity() -  sock->buf_send->size();
         size_t bytes_write = sock->buf_send->write(buf, std::min(available, len));
 
         buf += bytes_write;
         len -= bytes_write;
 
         // TODO Always ACK?
-        sendFlagPacket(sock, TH_ACK);
+        if (bytes_write > 0)
+            sendFlagPacket(sock, TH_ACK);
 
         if (len > 0) {
             syscall_blocks[sock] = {pid, syscallUUID};
-            write_cont[syscallUUID] = {buf, len};
-
+            write_cont[syscallUUID] = buf_write(buf, len, bytes_write);
         }
         else {
-            returnSystemCall(syscallUUID, len);
+            returnSystemCall(syscallUUID, bytes_write);
         }
         return;
     }

@@ -115,7 +115,6 @@ namespace APP_SOCKET
             buf_send->read(buf + sizeof(struct PROTOCOL::kens_hdr), c_size, offset);
         }
         hdr->tcp.seq = htonl(send_base + (uint32_t) offset);
-      //  hdr->tcp.seq = htonl(send_seq + c_size);
         hdr->tcp.check = htons(~E::NetworkUtil::tcp_sum(hdr->ip.ip_src.s_addr,
                                                         hdr->ip.ip_dst.s_addr,
                                                         (uint8_t *) &(hdr->tcp),
