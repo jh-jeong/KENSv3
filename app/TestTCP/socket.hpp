@@ -18,6 +18,8 @@
 #define RECV_BUFFER MSS*100
 #define SEND_BUFFER MSS*50
 
+#define SSTHRESH_INIT MSS*128
+
 namespace APP_SOCKET
 {
     class Address
@@ -30,6 +32,12 @@ namespace APP_SOCKET
         uint16_t port;
 
         bool operator == (const Address other);
+    };
+
+    enum CongStatus{
+        SLOW_START,
+        CONGESTION_AVOIDANCE,
+        FAST_RECOVERY
     };
 
     enum Status {
@@ -46,7 +54,6 @@ namespace APP_SOCKET
         TIME_WAIT
     };
 
-
     class Socket
     {
     public:
@@ -56,6 +63,7 @@ namespace APP_SOCKET
         Socket* parent;
 
         Status state;
+
         uint32_t send_base;
         uint32_t send_seq;
         uint32_t ack_seq;
@@ -67,6 +75,11 @@ namespace APP_SOCKET
         IndexedCacheBuffer *buf_recv;
         CircularBuffer *buf_send;
         u_int16_t rwnd;
+
+        CongStatus cong_state;
+        uint32_t cwnd;
+        uint32_t sstresh;
+        int dupACKcount;
 
         int fd;
 
@@ -87,7 +100,6 @@ namespace APP_SOCKET
         std::set<APP_SOCKET::Socket *> wait_sock;
         std::queue<APP_SOCKET::Socket *> est_queue;
     };
-
 }
 
 #endif //KENSV3_SOCKET_HPP

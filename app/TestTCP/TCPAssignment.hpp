@@ -50,7 +50,6 @@ namespace E
         std::unordered_map<APP_SOCKET::Socket *, UUID> timers;
         std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;
 
-
     public:
         TCPAssignment(Host* host);
         virtual void initialize();
@@ -60,7 +59,7 @@ namespace E
         APP_SOCKET::Socket *getAppSocket(int pid, int fd);
         bool checkOverlap (sockaddr_in* other);
 
-        bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag);
+        bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag, bool retransmit);
 
     protected:
         virtual void systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param) final;

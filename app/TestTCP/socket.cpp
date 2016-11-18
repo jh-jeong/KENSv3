@@ -50,6 +50,11 @@ namespace APP_SOCKET
         this->rwnd = 0;
 
         this->fd = fd;
+
+        this->cong_state = SLOW_START;
+        this->cwnd = MSS;
+        this->sstresh = SSTHRESH_INIT;
+        this->dupACKcount = 0;
     }
 
     Socket::~Socket() {
