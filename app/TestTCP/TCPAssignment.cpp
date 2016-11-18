@@ -238,8 +238,9 @@ namespace E {
 
             case APP_SOCKET::SYN_RCVD:
                 if (hdr.tcp.ack) {
-                    sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
                     sock->state = APP_SOCKET::ESTABLISHED;
+
+                    // TODO initial data?
 
                     Socket *parent = sock->parent;
 
@@ -740,7 +741,6 @@ namespace E {
     void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *payload,
                                      size_t len)
     {
-        std::cout << "read" << std::endl;
         Socket *sock = getAppSocket(pid, sockfd);
 
         if (sock == NULL) {
