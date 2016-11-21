@@ -59,7 +59,7 @@ namespace E
         APP_SOCKET::Socket *getAppSocket(int pid, int fd);
         bool checkOverlap (sockaddr_in* other);
 
-        bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag, bool retransmit);
+        bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag);
 
     protected:
         virtual void systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param) final;

@@ -63,29 +63,43 @@ namespace E {
         return false;
     }
 
-    bool TCPAssignment::sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag, bool retransmit = false)
+    bool TCPAssignment::sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag)
     {
-        size_t data_len = sock->buf_send->size();
-
         char payload[MSS + sizeof(struct PROTOCOL::kens_hdr)] = {0};
 
-        if ((flag & (TH_SYN | TH_FIN)) || data_len == 0) {
-            size_t p_size = sock->packetSize();
-            if (!sock->getPacket(payload, flag, 0))
+        size_t data_len = sock->buf_send->size();
+        size_t not_acked = sock->send_seq - sock->send_base;
+        size_t offset = not_acked;
+
+        if (sock->send_base == sock->fin_seq) {
+            not_acked--;
+        }
+
+        if (data_len < not_acked) {
+            std::cout << "data_len < not_acked" << std::endl;
+            return false;
+        }
+
+        size_t not_sent = data_len - not_acked;
+
+        if (flag & (TH_SYN | TH_FIN)) {
+            size_t p_size = sizeof(struct PROTOCOL::kens_hdr);
+
+            if (flag & TH_SYN) {
+                sock->syn_seq = sock->send_base;
+                if (flag & TH_ACK)
+                    sock->synack = true;
+            }
+            else sock->fin_seq = sock->send_seq;
+
+            if (!sock->getPacket(payload, flag, offset, 0))
                 return false;
             Packet *packet = allocatePacket(p_size);
             packet->writeData(0, payload, p_size);
-            if (flag & (TH_SYN | TH_FIN)) {
-                sock->send_seq++;
-            }
+            sock->send_seq++;
             this->sendPacket("IPv4", packet);
-        }
-        else {
-            size_t not_acked = sock->send_seq - sock->send_base;
-            size_t not_sent = data_len - not_acked;
-
-            size_t offset = retransmit ? 0 : not_acked;
-            while (not_sent > 0) {
+        } else {
+            do {
                 size_t c_size = std::min(not_sent, (size_t) MSS);
                 size_t p_size = c_size + sizeof(struct PROTOCOL::kens_hdr);
 
@@ -94,7 +108,7 @@ namespace E {
                                                            (uint32_t) sock->rwnd)))
                     break;
 
-                if (!sock->getPacket(payload, flag, offset))
+                if (!sock->getPacket(payload, flag, offset, c_size))
                     return false;
                 Packet *packet = allocatePacket(p_size);
                 packet->writeData(0, payload, p_size);
@@ -104,8 +118,7 @@ namespace E {
                 not_acked = sock->send_seq - sock->send_base;
                 offset += c_size;
                 not_sent -= c_size;
-            };
-
+            } while (not_sent > 0);
         }
         return true;
     }
@@ -212,6 +225,10 @@ namespace E {
             uint32_t ack_num = ntohl(hdr.tcp.ack_seq);
             if (ack_num > sock->send_base) {
                 bytes_ack = ack_num - sock->send_base;
+
+                if (sock->send_base == sock->fin_seq)
+                    bytes_ack = 0;
+
                 sock->send_base = ack_num;
 
                 u_int16_t rwnd = ntohs(hdr.tcp.th_win);
@@ -219,12 +236,59 @@ namespace E {
             }
             else if (ack_num == sock->send_base)
                 is_dupACK = true;
+
+            // Congestion control
+            switch (sock->cong_state) {
+                case APP_SOCKET::SLOW_START:
+                    if (is_dupACK)
+                        sock->dupACKcount++;
+                    if (sock->dupACKcount == 3) {
+                        sock->sstresh = sock->cwnd / 2;
+                        sock->cwnd = sock->sstresh + 3;
+                        sock->cong_state = APP_SOCKET::FAST_RECOVERY;
+                        break;
+                    }
+                    if (bytes_ack > 0) {
+                        sock->cwnd += MSS;
+                        sock->dupACKcount = 0;
+                    }
+                    if (sock->cwnd >= sock->sstresh)
+                        sock->cong_state = APP_SOCKET::CONGESTION_AVOIDANCE;
+                    break;
+                case APP_SOCKET::CONGESTION_AVOIDANCE:
+                    if (is_dupACK)
+                        sock->dupACKcount++;
+                    if (sock->dupACKcount == 3) {
+                        sock->sstresh = sock->cwnd / 2;
+                        sock->cwnd = sock->sstresh + 3;
+                        sock->cong_state = APP_SOCKET::FAST_RECOVERY;
+                        break;
+                    }
+                    if (bytes_ack > 0) {
+                        sock->cwnd += MSS * (MSS / (1.0 * sock->cwnd));
+                        sock->dupACKcount = 0;
+                    }
+                    break;
+                case APP_SOCKET::FAST_RECOVERY:
+                    if (is_dupACK)
+                        sock->cwnd += MSS;
+                    if (bytes_ack > 0) {
+                        sock->cwnd = sock->sstresh;
+                        sock->dupACKcount = 0;
+                        sock->cong_state = APP_SOCKET::CONGESTION_AVOIDANCE;
+                        break;
+                    }
+                    break;
+                default:
+                    break;
+            }
         }
 
         char data[MSS] = {0};
         size_t len_data = 0;
         len_data = packet->readData(sizeof (struct PROTOCOL::kens_hdr),
                                     data, MSS);
+
 
         switch (sock->state) {
             case APP_SOCKET::LISTEN:
@@ -328,15 +392,20 @@ namespace E {
                 break;
             case APP_SOCKET::ESTABLISHED:
                 if (hdr.tcp.fin) {
-                    sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
-                    sock->state = APP_SOCKET::CLOSE_WAIT;
+                    sock->peer_fin = true;
+                    sock->fin_rcvd = ntohl(hdr.tcp.seq);
+                }
 
+                if (sock->peer_fin && sock->fin_rcvd == sock->ack_seq) {
+                    sock->ack_seq = sock->fin_rcvd + 1;
+                    sock->state = APP_SOCKET::CLOSE_WAIT;
                     sendFlagPacket(sock, TH_ACK);
                     break;
                 }
 
                 if (hdr.tcp.ack) {
                     sock->buf_send->pop(bytes_ack);
+
                     std::unordered_map<APP_SOCKET::Socket *, syscall_cont>::iterator entry;
                     entry = syscall_blocks.find(sock);
 
@@ -370,8 +439,8 @@ namespace E {
                     if (sock->ack_seq > seq)
                         break;
                     if (sock->ack_seq < seq) {
-                        if (!sock->buf_recv->regCache(seq, data, len_data))
-                            break;
+                        sock->buf_recv->regCache(seq, data, len_data);
+                        break;
                     }
 
                     if (!sock->buf_recv->write(data, len_data))
@@ -399,54 +468,13 @@ namespace E {
                             returnSystemCall(syscallUUID, bytes_read);
                         }
                     }
+                }
 
-                    // Congestion control
-                    switch (sock->cong_state) {
-                        case APP_SOCKET::SLOW_START:
-                            if (is_dupACK)
-                                sock->dupACKcount++;
-                            if (sock->dupACKcount == 3) {
-                                sock->sstresh = sock->cwnd / 2;
-                                sock->cwnd = sock->sstresh + 3;
-                                sock->cong_state = APP_SOCKET::FAST_RECOVERY;
-                                break;
-                            }
-                            if (bytes_ack > 0) {
-                                sock->cwnd += MSS;
-                                sock->dupACKcount = 0;
-                            }
-                            if (sock->cwnd >= sock->sstresh)
-                                sock->cong_state = APP_SOCKET::CONGESTION_AVOIDANCE;
-                            break;
-                        case APP_SOCKET::CONGESTION_AVOIDANCE:
-                            if (is_dupACK)
-                                sock->dupACKcount++;
-                            if (sock->dupACKcount == 3) {
-                                sock->sstresh = sock->cwnd / 2;
-                                sock->cwnd = sock->sstresh + 3;
-                                sock->cong_state = APP_SOCKET::FAST_RECOVERY;
-                                break;
-                            }
-                            if (bytes_ack > 0) {
-                                sock->cwnd += MSS * (MSS / (1.0 * sock->cwnd));
-                                sock->dupACKcount = 0;
-                            }
-                            break;
-                        case APP_SOCKET::FAST_RECOVERY:
-                            if (is_dupACK)
-                                sock->cwnd += MSS;
-                            if (bytes_ack > 0) {
-                                sock->cwnd = sock->sstresh;
-                                sock->dupACKcount = 0;
-                                sock->cong_state = APP_SOCKET::CONGESTION_AVOIDANCE;
-                                break;
-                            }
-                            break;
-                        default:
-                            break;
-                    }
-
-                    sendFlagPacket(sock, TH_ACK);
+                sendFlagPacket(sock, TH_ACK);
+                break;
+            case APP_SOCKET::CLOSE_WAIT:
+                if (hdr.tcp.fin) {
+                    //sendFlagPacket(sock,TH_ACK);
                 }
                 break;
             case APP_SOCKET::LAST_ACK:
@@ -459,29 +487,31 @@ namespace E {
                 }
                 break;
             case APP_SOCKET::FIN_WAIT_1:
-                if (hdr.tcp.fin) {
-                    sock->ack_seq = ntohl(hdr.tcp.seq)+1;
+                if (hdr.tcp.ack) {
+                    sock->buf_send->pop(bytes_ack);
+                    if (sock->fin_seq + 1 == ntohl(hdr.tcp.ack_seq)) {
+                        sock->state = APP_SOCKET::FIN_WAIT_2;
+                    }
+
+                } else if (hdr.tcp.fin) {
+                    sock->peer_fin = true;
+                }
+
+                if (sock->peer_fin && sock->buf_send->size() == 0) {
+                    sock->ack_seq++;
                     sock->state = APP_SOCKET::CLOSING;
-                    sendFlagPacket(sock,TH_ACK);
+                    sendFlagPacket(sock, TH_ACK);
                 }
-                else if(hdr.tcp.ack){
-                    sock->ack_seq = ntohl(hdr.tcp.seq)+1;
-                    sock->state = APP_SOCKET::FIN_WAIT_2;
-                }
+
                 break;
             case APP_SOCKET::FIN_WAIT_2:
                 if (hdr.tcp.fin) {
-                    sock->ack_seq = ntohl(hdr.tcp.seq)+1;
+                    sock->ack_seq = ntohl(hdr.tcp.seq) + 1;
                     sendFlagPacket(sock,TH_ACK);
                     sock->state = APP_SOCKET::TIME_WAIT;
 
-                    UUID timer = addTimer(sock, 2 * MAX_SEG_LIFETIME);
+                    UUID timer = addTimer(sock, 2*MAX_SEG_LIFETIME);
                     timers[sock] = timer;
-                }
-                break;
-            case APP_SOCKET::CLOSE_WAIT:
-                if (hdr.tcp.fin) {
-                    sendFlagPacket(sock,TH_ACK);
                 }
                 break;
             case APP_SOCKET::TIME_WAIT:
@@ -491,10 +521,8 @@ namespace E {
                 break;
             case APP_SOCKET::CLOSING:
                 if (hdr.tcp.ack) {
-                    sock->ack_seq = ntohl(hdr.tcp.seq)+1;
                     sock->state = APP_SOCKET::TIME_WAIT;
-
-                    UUID timer = addTimer(sock, 2 * MAX_SEG_LIFETIME);
+                    UUID timer = addTimer(sock, 2*MAX_SEG_LIFETIME);
                     timers[sock] = timer;
                 }
                 break;
@@ -510,8 +538,10 @@ namespace E {
         entry = timers.find((APP_SOCKET::Socket *) payload);
 
         if (entry != timers.end()) {
+            APP_SOCKET::Socket *sock = (APP_SOCKET::Socket *) payload;
             cancelTimer(entry->second);
-            sockets.erase((APP_SOCKET::Socket *) payload);
+            sockets.erase(sock);
+            delete sock;
         }
     }
 
@@ -523,7 +553,7 @@ namespace E {
         }
         s_id sock_id = {pid, fd};
 
-        Socket *sock = new Socket(domain, type, fd);
+        Socket *sock = new Socket(domain, type);
         // TODO socket valid check
 
         sockets.insert(sock);
@@ -532,7 +562,6 @@ namespace E {
     }
 
     void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
-
         Socket *sock = getAppSocket(pid, fd);
 
         if (sock == NULL) {
@@ -551,6 +580,7 @@ namespace E {
             case APP_SOCKET::SYN_RCVD:
             case APP_SOCKET::SYN_SENT:
                 sockets.erase(sock);
+                delete sock;
                 break;
             case APP_SOCKET::ESTABLISHED:
                 sendFlagPacket(sock, TH_FIN);

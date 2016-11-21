@@ -31,7 +31,7 @@ namespace APP_SOCKET
         return matchPort && (matchAddr || hasAny);
     }
 
-    Socket::Socket(int domain, int type, int fd)
+    Socket::Socket(int domain, int type)
     {
         // TODO type validation
         this->state = CLOSED;
@@ -44,12 +44,16 @@ namespace APP_SOCKET
         this->send_seq = send_base;
         this->ack_seq = 0;
 
+        this->syn_seq = 0;
+        this->fin_seq = 0;
+        this->synack = false;
+        this->peer_fin = false;
+        this->fin_rcvd = 0;
+
         this->buf_recv = new IndexedCacheBuffer(RECV_BUFFER);
         this->buf_send = new CircularBuffer(SEND_BUFFER);
 
         this->rwnd = 0;
-
-        this->fd = fd;
 
         this->cong_state = SLOW_START;
         this->cwnd = MSS;
@@ -102,19 +106,11 @@ namespace APP_SOCKET
         return true;
     }
 
-    size_t Socket::packetSize() {
-        return sizeof(struct PROTOCOL::kens_hdr) + std::min(buf_send->size(), (size_t) MSS);
-    }
-
-    bool Socket::getPacket(char *buf, uint8_t flag, size_t offset) {
+    bool Socket::getPacket(char *buf, uint8_t flag, size_t offset, size_t c_size) {
 
         struct PROTOCOL::kens_hdr *hdr = (struct PROTOCOL::kens_hdr *) buf;
-        if (!make_hdr(hdr, flag)) {
+        if (!make_hdr(hdr, flag))
             return false;
-        }
-
-        size_t c_size = std::max((size_t) 0,
-                                 std::min(buf_send->size() - offset, (size_t) MSS));
 
         if (c_size != 0) {
             buf_send->read(buf + sizeof(struct PROTOCOL::kens_hdr), c_size, offset);
@@ -123,7 +119,7 @@ namespace APP_SOCKET
         hdr->tcp.check = htons(~E::NetworkUtil::tcp_sum(hdr->ip.ip_src.s_addr,
                                                         hdr->ip.ip_dst.s_addr,
                                                         (uint8_t *) &(hdr->tcp),
-                                                        (sizeof(struct tcphdr) + c_size)));
+                                                        (sizeof(struct tcphdr)) + c_size));
         return true;
     }
 
@@ -150,7 +146,6 @@ namespace APP_SOCKET
     Socket* Socket::getChild(Address *src, Address *dst, uint32_t ack_init) {
         Socket *d_sock = new Socket(*this);
 
-        d_sock->fd = -1;
         d_sock->addr_src = src;
         d_sock->addr_dest = dst;
         d_sock->state = SYN_RCVD;

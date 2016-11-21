@@ -64,6 +64,12 @@ namespace APP_SOCKET
 
         Status state;
 
+        uint32_t syn_seq;
+        uint32_t fin_seq;
+        bool synack;
+        bool peer_fin;
+        uint32_t fin_rcvd;
+
         uint32_t send_base;
         uint32_t send_seq;
         uint32_t ack_seq;
@@ -81,15 +87,12 @@ namespace APP_SOCKET
         uint32_t sstresh;
         int dupACKcount;
 
-        int fd;
-
-        Socket(int domain, int type, int fd);
+        Socket(int domain, int type);
         ~Socket();
 
         Socket* getChild(Address *src, Address *dst, uint32_t ack_init);
 
-        size_t packetSize();
-        bool getPacket(char *packet, uint8_t flag, size_t offset);
+        bool getPacket(char *packet, uint8_t flag, size_t offset, size_t c_size);
 
         bool listen(int backlog);
 
