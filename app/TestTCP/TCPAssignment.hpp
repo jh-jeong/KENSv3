@@ -24,7 +24,7 @@
 #define LOCAL_PORT_MIN 32768
 #define LOCAL_PORT_MAX 60999
 #define PORT_ITER_MAX (LOCAL_PORT_MAX - LOCAL_PORT_MIN) * 2
-#define MAX_SEG_LIFETIME 60
+#define MAX_SEG_LIFETIME 60000
 
 namespace E
 {
@@ -47,7 +47,6 @@ namespace E
         std::unordered_map<UUID, buf_write> write_cont;
         std::unordered_map<UUID, buf_read> read_cont;
 
-        std::unordered_map<APP_SOCKET::Socket *, UUID> timers;
         std::unordered_map<APP_SOCKET::Socket *, syscall_cont> syscall_blocks;
 
     public:
@@ -60,6 +59,7 @@ namespace E
         bool checkOverlap (sockaddr_in* other);
 
         bool sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag);
+        bool fastRetransmission(APP_SOCKET::Socket *sock);
 
     protected:
         virtual void systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param) final;

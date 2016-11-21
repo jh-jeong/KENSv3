@@ -63,63 +63,132 @@ namespace E {
         return false;
     }
 
-    bool TCPAssignment::sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag)
-    {
+    bool TCPAssignment::fastRetransmission(APP_SOCKET::Socket *sock) {
         char payload[MSS + sizeof(struct PROTOCOL::kens_hdr)] = {0};
+        size_t h_size = sizeof(struct PROTOCOL::kens_hdr);
 
         size_t data_len = sock->buf_send->size();
-        size_t not_acked = sock->send_seq - sock->send_base;
-        size_t offset = not_acked;
 
-        if (sock->send_base == sock->fin_seq) {
-            not_acked--;
-        }
+        size_t start = sock->send_base;
+        while (1) {
+            size_t seq = start;
+            size_t offset = seq - sock->send_base;
+            if (seq == sock->syn_seq) {
+                uint8_t flag_;
+                if (sock->synack)
+                    flag_ = TH_SYN | TH_ACK;
+                else
+                    flag_ = TH_SYN;
 
-        if (data_len < not_acked) {
-            std::cout << "data_len < not_acked" << std::endl;
-            return false;
-        }
+                if (!sock->getPacket(payload, flag_, offset, 0))
+                    return false;
+                Packet *packet = allocatePacket(h_size);
+                packet->writeData(0, payload, h_size);
+                this->sendPacket("IPv4", packet);
+                start += 1;
+            } else if (seq == sock->fin_seq) {
+                if (!sock->getPacket(payload, TH_FIN, offset, 0))
+                    return false;
+                Packet *packet = allocatePacket(h_size);
+                packet->writeData(0, payload, h_size);
+                this->sendPacket("IPv4", packet);
+                break;
+            } else {
+                size_t not_sent = data_len - offset;
+                if (not_sent == 0) break;
 
-        size_t not_sent = data_len - not_acked;
-
-        if (flag & (TH_SYN | TH_FIN)) {
-            size_t p_size = sizeof(struct PROTOCOL::kens_hdr);
-
-            if (flag & TH_SYN) {
-                sock->syn_seq = sock->send_base;
-                if (flag & TH_ACK)
-                    sock->synack = true;
-            }
-            else sock->fin_seq = sock->send_seq;
-
-            if (!sock->getPacket(payload, flag, offset, 0))
-                return false;
-            Packet *packet = allocatePacket(p_size);
-            packet->writeData(0, payload, p_size);
-            sock->send_seq++;
-            this->sendPacket("IPv4", packet);
-        } else {
-            do {
                 size_t c_size = std::min(not_sent, (size_t) MSS);
                 size_t p_size = c_size + sizeof(struct PROTOCOL::kens_hdr);
 
-                if (not_acked + c_size > std::max((uint32_t) MSS,
-                                                  std::min(sock->cwnd,
-                                                           (uint32_t) sock->rwnd)))
+                if (offset + c_size > std::max((uint32_t) MSS,
+                                               std::min(sock->cwnd,
+                                                        (uint32_t) sock->rwnd)))
                     break;
 
-                if (!sock->getPacket(payload, flag, offset, c_size))
+                if (!sock->getPacket(payload, TH_ACK, offset, c_size))
                     return false;
                 Packet *packet = allocatePacket(p_size);
                 packet->writeData(0, payload, p_size);
                 this->sendPacket("IPv4", packet);
 
-                sock->send_seq += c_size;
-                not_acked = sock->send_seq - sock->send_base;
-                offset += c_size;
-                not_sent -= c_size;
-            } while (not_sent > 0);
+                start += c_size;
+            }
         }
+        return true;
+    }
+
+    bool TCPAssignment::sendFlagPacket(APP_SOCKET::Socket *sock, uint8_t flag)
+    {
+        char payload[MSS + sizeof(struct PROTOCOL::kens_hdr)] = {0};
+        size_t h_size = sizeof(struct PROTOCOL::kens_hdr);
+
+        size_t data_len = sock->buf_send->size();
+
+        if (flag & (TH_SYN | TH_FIN)) {
+            if (flag & TH_SYN) {
+                sock->syn_seq = sock->send_base;
+                if (flag & TH_ACK)
+                    sock->synack = true;
+            }
+            if (flag & TH_FIN) {
+                sock->fin_seq = sock->send_base + (uint32_t) data_len;
+            }
+        }
+
+        while (1) {
+            size_t seq = sock->send_seq;
+            size_t offset = seq - sock->send_base;
+            if (seq == sock->syn_seq) {
+                uint8_t flag_;
+                if (sock->synack)
+                    flag_ = TH_SYN | TH_ACK;
+                else
+                    flag_ = TH_SYN;
+
+                if (!sock->getPacket(payload, flag_, offset, 0))
+                    return false;
+                Packet *packet = allocatePacket(h_size);
+                packet->writeData(0, payload, h_size);
+                this->sendPacket("IPv4", packet);
+                sock->send_seq += 1;
+                break;
+            } else if (seq == sock->fin_seq) {
+
+                if (!sock->getPacket(payload, TH_FIN, offset, 0))
+                    return false;
+                Packet *packet = allocatePacket(h_size);
+                packet->writeData(0, payload, h_size);
+                this->sendPacket("IPv4", packet);
+                sock->send_seq += 1;
+                break;
+            } else {
+                size_t not_sent = data_len - offset;
+
+                size_t c_size = std::min(not_sent, (size_t) MSS);
+                size_t p_size = c_size + sizeof(struct PROTOCOL::kens_hdr);
+
+                if (offset + c_size > std::max((uint32_t) MSS,
+                                               std::min(sock->cwnd,
+                                                        (uint32_t) sock->rwnd)))
+                    break;
+
+                if (!sock->getPacket(payload, TH_ACK, offset, c_size))
+                    return false;
+                Packet *packet = allocatePacket(p_size);
+                packet->writeData(0, payload, p_size);
+                this->sendPacket("IPv4", packet);
+
+                if (not_sent == 0) break;
+
+                sock->send_seq += c_size;
+            }
+        }
+
+        if (sock->timer_slot == 0) {
+            sock->send_time = this->getHost()->getSystem()->getCurrentTime();
+            sock->timer_slot = addTimer(sock, (Time) sock->rto);
+        }
+
         return true;
     }
 
@@ -222,6 +291,15 @@ namespace E {
         uint32_t bytes_ack = 0;
         bool is_dupACK = false;
         if (hdr.tcp.ack) {
+            Time RTT = this->getHost()->getSystem()->getCurrentTime() - sock->send_time;
+            double SRTT = (1 - ALPHA) * sock->rtt + ALPHA * RTT;
+            double RTTVAR = (1 - BETA) * sock->rttvar + BETA * fabs(SRTT - RTT);
+            double RTO = SRTT + K * RTTVAR;
+
+            sock->rtt = SRTT;
+            sock->rto = RTO;
+            sock->rttvar = RTTVAR;
+
             uint32_t ack_num = ntohl(hdr.tcp.ack_seq);
             if (ack_num > sock->send_base) {
                 bytes_ack = ack_num - sock->send_base;
@@ -230,6 +308,12 @@ namespace E {
                     bytes_ack = 0;
 
                 sock->send_base = ack_num;
+
+                if (sock->timer_slot > 0)
+                    cancelTimer(sock->timer_slot);
+
+                if (bytes_ack > 0)
+                    sock->timer_slot = addTimer(sock, (Time) sock->rto);
 
                 u_int16_t rwnd = ntohs(hdr.tcp.th_win);
                 sock->rwnd = rwnd;
@@ -246,6 +330,7 @@ namespace E {
                         sock->sstresh = sock->cwnd / 2;
                         sock->cwnd = sock->sstresh + 3;
                         sock->cong_state = APP_SOCKET::FAST_RECOVERY;
+                        fastRetransmission(sock);
                         break;
                     }
                     if (bytes_ack > 0) {
@@ -262,6 +347,7 @@ namespace E {
                         sock->sstresh = sock->cwnd / 2;
                         sock->cwnd = sock->sstresh + 3;
                         sock->cong_state = APP_SOCKET::FAST_RECOVERY;
+                        fastRetransmission(sock);
                         break;
                     }
                     if (bytes_ack > 0) {
@@ -304,7 +390,6 @@ namespace E {
                         sendFlagPacket(d_sock, TH_SYN | TH_ACK);
                     }
                     else {
-                        sendFlagPacket(d_sock, TH_RST);
                         delete d_sock;
                     }
                 }
@@ -381,7 +466,6 @@ namespace E {
                         std::cout << "SYN_SENT socket must save its context" << std::endl;
                         break;
                     }
-
                     sendFlagPacket(sock, TH_ACK);
 
                     UUID syscallUUID = entry->second.second;
@@ -404,6 +488,7 @@ namespace E {
                 }
 
                 if (hdr.tcp.ack) {
+
                     sock->buf_send->pop(bytes_ack);
 
                     std::unordered_map<APP_SOCKET::Socket *, syscall_cont>::iterator entry;
@@ -468,9 +553,9 @@ namespace E {
                             returnSystemCall(syscallUUID, bytes_read);
                         }
                     }
-                }
 
-                sendFlagPacket(sock, TH_ACK);
+                    sendFlagPacket(sock, TH_ACK);
+                }
                 break;
             case APP_SOCKET::CLOSE_WAIT:
                 if (hdr.tcp.fin) {
@@ -510,8 +595,11 @@ namespace E {
                     sendFlagPacket(sock,TH_ACK);
                     sock->state = APP_SOCKET::TIME_WAIT;
 
-                    UUID timer = addTimer(sock, 2*MAX_SEG_LIFETIME);
-                    timers[sock] = timer;
+                    if (sock->timer_slot > 0) {
+                        cancelTimer(sock->timer_slot);
+                        sock->timer_slot = 0;
+                    }
+                    sock->time_wait = addTimer(sock, (uint64_t) 2 * MAX_SEG_LIFETIME * 1000 * 1000);
                 }
                 break;
             case APP_SOCKET::TIME_WAIT:
@@ -522,8 +610,12 @@ namespace E {
             case APP_SOCKET::CLOSING:
                 if (hdr.tcp.ack) {
                     sock->state = APP_SOCKET::TIME_WAIT;
-                    UUID timer = addTimer(sock, 2*MAX_SEG_LIFETIME);
-                    timers[sock] = timer;
+
+                    if (sock->timer_slot > 0) {
+                        cancelTimer(sock->timer_slot);
+                        sock->timer_slot = 0;
+                    }
+                    sock->time_wait = addTimer(sock, (uint64_t) 2 * MAX_SEG_LIFETIME * 1000 * 1000);
                 }
                 break;
             default:
@@ -534,14 +626,22 @@ namespace E {
     }
 
     void TCPAssignment::timerCallback(void *payload) {
-        std::unordered_map<APP_SOCKET::Socket *, UUID>::iterator entry;
-        entry = timers.find((APP_SOCKET::Socket *) payload);
-
-        if (entry != timers.end()) {
-            APP_SOCKET::Socket *sock = (APP_SOCKET::Socket *) payload;
-            cancelTimer(entry->second);
+        APP_SOCKET::Socket *sock = (APP_SOCKET::Socket *) payload;
+        if (sock->time_wait != 0) {
+            cancelTimer(sock->time_wait);
             sockets.erase(sock);
             delete sock;
+        }
+        else {
+            sock->sstresh = sock->cwnd / 2;
+            sock->cwnd = MSS;
+            sock->dupACKcount = 0;
+
+            sock->cong_state = APP_SOCKET::SLOW_START;
+            fastRetransmission(sock);
+
+            sock->send_time = this->getHost()->getSystem()->getCurrentTime();
+            sock->timer_slot = addTimer(sock, (Time) sock->rto);
         }
     }
 

@@ -59,6 +59,14 @@ namespace APP_SOCKET
         this->cwnd = MSS;
         this->sstresh = SSTHRESH_INIT;
         this->dupACKcount = 0;
+
+        this->rto = (uint64_t) DEFAULT_RTO * 1000 * 1000;
+        this->rtt = (uint64_t) DEFAULT_RTT * 1000 * 1000;
+        this->rttvar = 0;
+        this->send_time = 0;
+
+        this->timer_slot = 0;
+        this->time_wait = 0;
     }
 
     Socket::~Socket() {
@@ -155,6 +163,9 @@ namespace APP_SOCKET
         d_sock->parent = this;
         d_sock->buf_recv = new IndexedCacheBuffer(RECV_BUFFER);
         d_sock->buf_send = new CircularBuffer(SEND_BUFFER);
+
+        this->timer_slot = 0;
+        this->time_wait = 0;
 
         return d_sock;
     }

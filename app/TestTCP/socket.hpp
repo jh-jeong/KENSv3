@@ -19,6 +19,11 @@
 #define SEND_BUFFER MSS*50
 
 #define SSTHRESH_INIT MSS*128
+#define DEFAULT_RTT 100
+#define DEFAULT_RTO 3000
+#define ALPHA 0.125
+#define BETA 0.25
+#define K 4
 
 namespace APP_SOCKET
 {
@@ -86,6 +91,14 @@ namespace APP_SOCKET
         uint32_t cwnd;
         uint32_t sstresh;
         int dupACKcount;
+
+        int64_t send_time;
+        double rto;
+        double rtt;
+        double rttvar;
+
+        uint64_t timer_slot;
+        uint64_t time_wait;
 
         Socket(int domain, int type);
         ~Socket();
