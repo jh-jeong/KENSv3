@@ -16,7 +16,7 @@
 
 #define MSS 512
 #define RECV_BUFFER MSS*100
-#define SEND_BUFFER MSS*50
+#define SEND_BUFFER MSS*100
 
 #define SSTHRESH_INIT MSS*128
 #define DEFAULT_RTT 100

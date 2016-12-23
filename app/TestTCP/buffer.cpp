@@ -54,7 +54,7 @@ size_t CircularBuffer::read(char *data, size_t bytes, size_t offset)
     if (size_ <= offset) return 0;
 
     size_t capacity = capacity_;
-    size_t bytes_to_read = std::min(bytes, size_-offset);
+    size_t bytes_to_read = std::min(bytes, size_ - offset);
     size_t off_index = (beg_index_ + offset) % capacity;
 
     // Read in a single step
